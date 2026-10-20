@@ -2,6 +2,8 @@
 
 #include "log.h"
 
+#include <nod.h>
+
 #include <cstring>
 
 Disc g_disc;
@@ -9,8 +11,10 @@ Disc g_disc;
 static uint32_t be32(const uint8_t* p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
 
 bool Disc::open(const std::string& path) {
-  m_f = fopen(path.c_str(), "rb");
-  if (!m_f) return false;
+  if (nod_disc_open(path.c_str(), nullptr, &m_nod) != NOD_RESULT_OK) {
+    LOG_ERROR("nod: %s", nod_error_message());
+    return false;
+  }
   uint8_t hdr[0x440];
   if (!read(0, hdr, sizeof(hdr))) return false;
   m_gameId.assign(reinterpret_cast<char*>(hdr), 6);
@@ -44,6 +48,13 @@ bool Disc::open(const std::string& path) {
 
 bool Disc::read(uint64_t offset, void* dst, uint32_t size) {
   std::lock_guard lk(m_mutex);
-  if (_fseeki64(m_f, (long long)offset, SEEK_SET) != 0) return false;
-  return fread(dst, 1, size, m_f) == size;
+  if (nod_seek(m_nod, (int64_t)offset, 0) != (int64_t)offset) return false;
+  auto* out = static_cast<uint8_t*>(dst);
+  while (size) {
+    int64_t n = nod_read(m_nod, out, size);
+    if (n <= 0) return false;
+    out += n;
+    size -= (uint32_t)n;
+  }
+  return true;
 }

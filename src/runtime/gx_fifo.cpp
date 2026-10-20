@@ -214,6 +214,10 @@ void gpReceive(const uint8_t* bytes, uint32_t n) {
   uint32_t used = 0;
   parseBuffer(g_stream.data(), (uint32_t)g_stream.size(), &used, 0);
   g_stream.erase(g_stream.begin(), g_stream.begin() + used);
+  if (g_stream.size() > 0x01000000) {
+    LOG_ERROR("GX: %zu bytes waiting for a complete command (opcode %02X); dropping them", g_stream.size(), g_stream[0]);
+    g_stream.clear();
+  }
 }
 
 // --- write-gather pipe ------------------------------------------------------------

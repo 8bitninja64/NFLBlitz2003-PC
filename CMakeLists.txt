@@ -37,7 +37,7 @@ set(BLITZ_RUNTIME_SOURCES
 )
 
 # Aurora: GX on WebGPU (Dawn) + SDL3 window/input.
-set(AURORA_ENABLE_DVD OFF CACHE BOOL "" FORCE)
+set(AURORA_ENABLE_DVD ON CACHE BOOL "" FORCE)
 set(AURORA_ENABLE_THP OFF CACHE BOOL "" FORCE)
 set(AURORA_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(extern/aurora EXCLUDE_FROM_ALL)
@@ -49,14 +49,14 @@ endif()
 
 add_library(blitz_runtime STATIC ${BLITZ_RUNTIME_SOURCES})
 target_include_directories(blitz_runtime PUBLIC src/runtime)
-target_link_libraries(blitz_runtime PUBLIC blitz_game aurora::card)
+target_link_libraries(blitz_runtime PUBLIC blitz_game aurora::card aurora::dvd)
 if (WIN32)
   target_link_libraries(blitz_runtime PUBLIC winmm)
 endif()
 
 # Headless runner: no graphics/audio, for bring-up of CPU/OS/HLE.
 add_executable(blitz_headless src/app/main_headless.cpp)
-target_link_libraries(blitz_headless PRIVATE blitz_runtime)
+target_link_libraries(blitz_headless PRIVATE blitz_runtime aurora::gx aurora::vi)
 
 # The game: Aurora window, GX via gx_bridge.
 add_library(blitz_gx STATIC src/runtime/gx_bridge.cpp)
@@ -65,7 +65,7 @@ add_executable(blitz src/app/main_window.cpp src/app/overlay.cpp)
 target_link_libraries(blitz PRIVATE blitz_gx aurora::main)
 target_include_directories(blitz PRIVATE extern/aurora/lib)
 if (WIN32)
-  target_link_libraries(blitz PRIVATE comdlg32)
+  target_link_libraries(blitz PRIVATE comdlg32 psapi)
   set_target_properties(blitz PROPERTIES OUTPUT_NAME "NFLBlitz2003")
 endif()
 # Shared libraries (Dawn, DXC, SDL3, ...) next to the executable.

@@ -68,7 +68,7 @@ bool bootFromArgs(int argc, char** argv, BootOptions* opts) {
                                        : "Cannot open the disc image '" + discPath + "'.";
     LOG_ERROR("%s (use --disc <path>)", msg.c_str());
     if (opts && opts->showError)
-      opts->showError(msg + "\n\nPlease provide your own NFL Blitz 2003 (USA) GameCube disc image (.iso).");
+      opts->showError(msg + "\n\nPlease provide your own NFL Blitz 2003 (USA) GameCube disc image (.iso or .rvz).");
     return false;
   }
   if (g_disc.gameId() != "GO3E5D") {

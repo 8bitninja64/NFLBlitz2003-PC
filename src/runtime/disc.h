@@ -1,8 +1,7 @@
-// GameCube disc image access (plain ISO/GCM).
+// GameCube disc image access through nod: ISO/GCM, RVZ, WIA, CISO, GCZ, NFS, ...
 #pragma once
 
 #include <cstdint>
-#include <cstdio>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -24,7 +23,7 @@ public:
   const std::vector<DiscFile>& files() const { return m_files; }
 
 private:
-  FILE* m_f = nullptr;
+  struct NodHandle* m_nod = nullptr;
   std::mutex m_mutex;
   std::string m_gameId;
   uint32_t m_dolOff = 0, m_fstOff = 0, m_fstSize = 0;

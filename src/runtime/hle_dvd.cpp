@@ -72,6 +72,7 @@ void worker() {
 }
 
 void submit(const Request& r) {
+  if (r.length > 0x01800000) LOG_ERROR("DVD read of %u bytes at %llx (block %08X)", r.length, (unsigned long long)r.discOffset, r.block);
   guest::wr32(r.block + kCbState, kStateBusy);
   guest::wr32(r.block + kCbCommand, 1);  // read
   guest::wr32(r.block + kCbAddr, r.dst);

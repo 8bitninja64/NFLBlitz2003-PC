@@ -73,6 +73,9 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   (`tools/ppm2png.py`). `BLITZ_GX_DUMP=<frame>` translated stream → build/gxframe_N.bin
   (`tools/gxdump.py [--all]`) plus bound textures (`tools/tex2png.py`). `BLITZ_GX_DROP=bp59,xf1018,...`
   drops register loads (bisecting state bugs).
+- `BLITZ_MEMWATCH=1` logs (and saves to build/leakframe.bin) any frame whose processing grows the process
+  by > 256 MB. `BLITZ_GX_NOTEX` / `BLITZ_GX_NOCOPY` drop texture binds / EFB copies (bisecting).
+- `BLITZ_MENU_AT=<s>` opens the F1 menu after N seconds (screenshots).
 - `-DBLITZ_AURORA_CHECKS=ON` builds Aurora GX with its debug validation (FATALs on odd-but-legal state).
 - Aurora persists pipelines in %APPDATA%/NFL Blitz 2003/pipeline_cache.db: a bad pipeline from an
   experiment is replayed at every start, so delete it when debugging shader/state crashes.
@@ -84,6 +87,9 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - RenderWare calls display lists at unaligned addresses/sizes: the CP ignores the low 5 bits.
 - The game cancels and re-creates threads in the same OSThread struct: the scheduler retires the old record.
 - Windows timer resolution is raised to 1 ms at startup (retrace pacing).
+- RenderWare issues 0-vertex draws (GXBegin(strip, n=0)); Aurora underflows the primitive count (8 GB
+  index buffer), so the bridge drops draws with too few vertices for their primitive.
+- Discs are read through nod (aurora::dvd's dependency): ISO, RVZ, WIA, CISO, GCZ, NFS.
 - Don't write C/C++ with escapes through bash heredocs/python-in-bash; use the Write/Edit tools.
 
 ## Known addresses (USA)

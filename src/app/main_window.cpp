@@ -17,6 +17,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <commdlg.h>
+#include <psapi.h>
 #endif
 
 #include <aurora/aurora.h>
@@ -177,6 +178,14 @@ static void applyDisplay() {
   VISetFrameBufferScale(st.resolutionScale);  // 0 = window size, N = N x 480 lines
 }
 
+static size_t processMemory() {
+#ifdef _WIN32
+  PROCESS_MEMORY_COUNTERS_EX pmc{};
+  if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) return pmc.PrivateUsage;
+#endif
+  return 0;
+}
+
 static bool g_quit = false;
 static void requestQuit() { g_quit = true; }
 
@@ -228,7 +237,8 @@ static std::string pickDisc() {
   OPENFILENAMEW ofn{};
   ofn.lStructSize = sizeof(ofn);
   ofn.lpstrTitle = L"Select your NFL Blitz 2003 (USA) GameCube disc image";
-  ofn.lpstrFilter = L"GameCube disc image (*.iso;*.gcm)\0*.iso;*.gcm\0All files\0*.*\0";
+  ofn.lpstrFilter = L"GameCube disc image (*.iso;*.gcm;*.rvz;*.wia;*.ciso;*.gcz;*.nfs)\0"
+                    L"*.iso;*.gcm;*.rvz;*.wia;*.ciso;*.gcz;*.nfs\0All files\0*.*\0";
   ofn.lpstrFile = file;
   ofn.nMaxFile = MAX_PATH;
   ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
@@ -346,11 +356,24 @@ int main(int argc, char** argv) {
     auto t1 = clk::now();
     if (began) {
       static const bool empty = getenv("BLITZ_EMPTY_FRAMES") != nullptr;  // pacing diagnostics
+      static const bool memWatch = getenv("BLITZ_MEMWATCH") != nullptr;  // leak hunting
+      size_t before = memWatch ? processMemory() : 0;
       if (haveFrame && !empty) GXCallDisplayList(frame.data(), (u32)frame.size());
       overlay::draw(fps);
       // Once the FIFO is processed Aurora holds its own copies of everything it read from
       // guest memory: let the game build its next frame while this one is presented.
       aurora::gx::fifo::drain();
+      if (memWatch) {
+        size_t after = processMemory();
+        if (after > before + (256u << 20)) {
+          LOG_ERROR("frame %llu grew the process by %zu MB (%zu bytes of commands); saved build/leakframe.bin",
+                    (unsigned long long)frames, (after - before) >> 20, frame.size());
+          if (FILE* f = fopen("build/leakframe.bin", "wb")) {
+            fwrite(frame.data(), 1, frame.size(), f);
+            fclose(f);
+          }
+        }
+      }
     }
     if (haveFrame && !paused) {
       gxbridge::frameConsumed();

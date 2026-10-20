@@ -101,6 +101,8 @@ private:
   uint32_t m_copySrc = 0, m_copySize = 0, m_copyDest = 0;
 
   bool m_dumpTextures = false;
+  uint64_t m_arrayBytes = 0, m_arrayLoads = 0;  // per frame
+  uint64_t m_invalidates = 0, m_invalidatedBytes = 0;
   uint32_t m_bp41 = 0, m_bpF3 = 0, m_bp42 = 0, m_bp43 = 0;
   std::unordered_map<uint64_t, uint32_t> m_blendHist;
 
@@ -134,10 +136,13 @@ void Bridge::ensureArray(int i, uint32_t needed) {
   Array& a = m_arrays[i];
   uint64_t ptr = (uint64_t)(uintptr_t)hostPhys(a.base);
   if (ptr == a.emittedPtr && needed <= a.emittedSize) return;
+  if (needed > 0x01000000) LOG_ERROR("GX: vertex array %d needs %u bytes (base %08X stride %u)", i, needed, a.base, a.stride);
   uint32_t size = (needed + 255) & ~255u;
   if (ptr == a.emittedPtr && size < a.emittedSize) size = a.emittedSize;
   uint32_t limit = guest::kMem1Size - (a.base & guest::kMemMask);
   if (size > limit) size = limit;
+  m_arrayBytes += size;
+  m_arrayLoads++;
   aurora(GX_AURORA_LOAD_ARRAYBASE + i);
   put64(ptr);
   put32(size);
@@ -147,6 +152,8 @@ void Bridge::ensureArray(int i, uint32_t needed) {
 }
 
 void Bridge::flushTextures() {
+  static const bool noTex = getenv("BLITZ_GX_NOTEX") != nullptr;  // debugging
+  if (noTex) return;
   for (int id = 0; id < 8; id++) {
     TexMap& t = m_tex[id];
     if (!t.dirty) continue;
@@ -253,6 +260,8 @@ void Bridge::bp(uint32_t v, const uint8_t* raw) {
       endFrame();
       return;
     }
+    static const bool noCopy = getenv("BLITZ_GX_NOCOPY") != nullptr;  // debugging
+    if (noCopy) return;
     uint32_t left = field(m_copySrc, 10, 0), top = field(m_copySrc, 10, 10);
     uint32_t w = field(m_copySize, 10, 0) + 1, h = field(m_copySize, 10, 10) + 1;
     bool mip = v & (1u << 9);
@@ -290,6 +299,14 @@ void Bridge::cp(uint8_t reg, uint32_t v, const uint8_t* raw) {
 }
 
 void Bridge::draw(const uint8_t* p, uint32_t size) {
+  // Too few vertices for the primitive draws nothing on hardware; Aurora would underflow its
+  // primitive count (a 0-vertex strip allocated an 8 GB index buffer).
+  {
+    uint32_t n = (uint32_t)p[1] << 8 | p[2];
+    uint32_t prim = (p[0] >> 3) & 7;  // 0 quads, 1 quads2, 2 tris, 3 strip, 4 fan, 5 lines, 6 linestrip, 7 points
+    static const uint8_t kMin[8] = {4, 4, 3, 3, 3, 2, 2, 1};
+    if (n < kMin[prim]) return;
+  }
   flushTextures();
   // BLITZ_BLEND_LOG: per-frame histogram of (blend mode BP 0x41, alpha compare BP 0xF3, pixel format BP 0x43).
   static const bool blendLog = getenv("BLITZ_BLEND_LOG") != nullptr;
@@ -401,6 +418,11 @@ void Bridge::command(const uint8_t* p, uint32_t size) {
   case 0x30:
   case 0x38: indexedXf(p); return;
   case 0x44: return;  // not understood by Aurora; no visible effect
+  case 0x48:
+    m_invalidates++;
+    for (const Array& a : m_arrays) m_invalidatedBytes += a.emittedSize;
+    putRaw(p, size);
+    return;
   default:
     if (op >= 0x80) draw(p, size);
     else putRaw(p, size);
@@ -408,6 +430,21 @@ void Bridge::command(const uint8_t* p, uint32_t size) {
 }
 
 void Bridge::endFrame() {
+  if (m_arrayBytes > 0x02000000) {
+    static int reported = 0;
+    if (reported++ < 20)
+      LOG_ERROR("GX: frame uploads %llu MB of vertex arrays in %llu loads", (unsigned long long)(m_arrayBytes >> 20),
+                (unsigned long long)m_arrayLoads);
+  }
+  if (m_invalidatedBytes > 0x02000000) {
+    static int reported2 = 0;
+    if (reported2++ < 20)
+      LOG_ERROR("GX: %llu vertex cache invalidations, %llu MB of arrays to re-upload",
+                (unsigned long long)m_invalidates, (unsigned long long)(m_invalidatedBytes >> 20));
+  }
+  m_arrayBytes = m_arrayLoads = 0;
+  m_invalidates = m_invalidatedBytes = 0;
+  if (m_out.size() > 0x04000000) LOG_ERROR("GX: frame stream is %zu bytes", m_out.size());
   static uint32_t frameNo = 0;
   static const char* dump = getenv("BLITZ_GX_DUMP");  // <frame>: save the translated stream
   if (dump && frameNo == (uint32_t)atoi(dump)) {
