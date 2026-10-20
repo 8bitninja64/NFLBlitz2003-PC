@@ -93,12 +93,14 @@ Library layout: game ..8017A0C4, TRK, MSL/runtime 8018114C, SDK 801905D4..801B79
 RenderWare 801D13C8..80227364.
 
 ## Status (2026-10-21)
-- Plays: boots, intro movies, title/attract, memory-card check (no card → continue without save), main
-  menu, Quickplay team matchup, and in-game football with working input, at the game's full 60 fps.
-- Audio: AX command lists processed on the host; intro movies, menus and gameplay produce sound
-  (verified by recording, not yet by ear). Not modelled: polyphase SRC filter (cubic instead), ITD/HRTF,
-  low-pass filter, compressor; the title screen is silent (check whether that's correct).
-- Memory card: detection, mount/check, directory and open work (empty card → "no player records");
-  create/write paths are wired but not yet exercised by a real save.
-- Not yet:  (CARD → Aurora), some effects (a white bloom washed the screen during one play: likely an
-  EFB copy / post effect), RVZ discs, first-run setup / packaging, options UI.
+- Plays: boot, intro movies, title/attract, memory-card check, main menu, Quickplay matchup and
+  in-game football with input and sound, locked 60 fps; a 6-minute random-input soak ran without
+  game crashes (one diagnostics crash, fixed).
+- Modern features: Hor+ widescreen (2D centered or stretched), native-resolution rendering plus
+  resolution_scale (N x 480 lines), MSAA, anisotropy, Alt+Enter/F11 fullscreen, F1 ImGui settings
+  overlay that pauses the game, FPS counter, settings.ini, disc picker with remembered path.
+- Audio: AX command lists processed on the host (verified by recording, not yet by ear). Not modelled:
+  polyphase SRC filter (cubic instead), ITD/HRTF, low-pass filter, compressor; the title is silent.
+- Memory card: detection, mount/check, directory and open work; writing a save not yet exercised.
+- Open: bright white glare during the stadium intro / some plays (additive and dst-alpha blending:
+  compare with real hardware footage); RVZ discs; redistributable first-run compile setup.
