@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace overlay {
 
@@ -222,7 +223,14 @@ void drawSettings() {
       }
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem("Controls")) {
+    // BLITZ_MENU_TAB=Controls selects that tab once (screenshots).
+    static const char* startTab = getenv("BLITZ_MENU_TAB");
+    auto tabFlags = [](const char* name) {
+      if (!startTab || strcmp(startTab, name)) return ImGuiTabItemFlags_None;
+      startTab = nullptr;
+      return ImGuiTabItemFlags_SetSelected;
+    };
+    if (ImGui::BeginTabItem("Controls", nullptr, tabFlags("Controls"))) {
       drawControls();
       ImGui::EndTabItem();
     }
