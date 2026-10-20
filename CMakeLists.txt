@@ -16,10 +16,12 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 set(BLITZ_RUNTIME_SOURCES
+  src/runtime/audio_out.cpp
   src/runtime/boot.cpp
   src/runtime/boot_args.cpp
   src/runtime/cpu.cpp
   src/runtime/disc.cpp
+  src/runtime/dsp_ax.cpp
   src/runtime/gx_fifo.cpp
   src/runtime/hle_dvd.cpp
   src/runtime/hle_os.cpp

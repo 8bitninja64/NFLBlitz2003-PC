@@ -28,6 +28,12 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
     is runnable. hle_thread.cpp: OSCreate/Resume/Suspend/Sleep/Wakeup/Exit/Cancel, scheduler, alarms.
   - hw.cpp: register models that keep the SDK recompiled: EXI (instant), VI (59.94 Hz retrace runs
     the game's __VIRetraceHandler), DSP mailbox stand-in (boot handshake only) + real ARAM DMA, AI counter.
+  - dsp_ax.cpp: host implementation of the AX microcode's command lists (MusyX on GameCube runs on AX):
+    voices from parameter blocks (MusyX _PB layout), ADPCM/PCM8/PCM16 from ARAM, SRC, envelope, bus
+    volume ramps, 1 ms updates, aux send/return, studio routing, stereo out (+ matrixed surround).
+    hw.cpp answers 0xBABE<size>+address mails with it and reports 0xDCD10001 (task resumed).
+    The AI DMA engine (hw.cpp) plays each output buffer in real time, raising the AI interrupt that
+    drives MusyX's 5 ms tick; samples go to audio_out (SDL3 stream in the window app).
   - hle_dvd.cpp: DVDReadAsyncPrio etc. from the disc on a worker thread (DVDOpen stays recompiled).
   - hle_pad.cpp + pad_input.cpp: PADRead etc. from a snapshot the window app fills from Aurora PAD
     (SDL gamepads, GC adapter, keyboard) each loop; rumble goes back the same way. SI is not emulated.
@@ -57,6 +63,8 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   LEFT RIGHT STICKUP/DOWN/LEFT/RIGHT). Reaching a match from boot (title ~22 s at 60 fps):
   START every 60 from 1300 (x12), A at 2200 and 2400 (continue without card), START every 60 from 2700
   (x6), then A every 120 from 3800.
+- `BLITZ_WAV=<file>` records the AI output (32 kHz stereo WAV); `BLITZ_MUTE=1` opens no audio device;
+  `-v` logs AX lists/voices every 2 s.
 - `BLITZ_PERF=1` logs guest vs handoff time per frame and Aurora begin/process/end times.
 - `BLITZ_PEEK=addr,...` guest words in each watchdog dump. `BLITZ_XFB_DUMP=<retrace>[,n]` XFB → PPM
   (`tools/ppm2png.py`). `BLITZ_GX_DUMP=<frame>` translated stream → build/gxframe_N.bin
@@ -84,6 +92,8 @@ RenderWare 801D13C8..80227364.
 ## Status (2026-10-21)
 - Plays: boots, intro movies, title/attract, memory-card check (no card → continue without save), main
   menu, Quickplay team matchup, and in-game football with working input, at the game's full 60 fps.
-- Not yet: audio (MusyX DSP microcode → host mixer; the stand-in DSP only does the boot handshake),
-  memory card (CARD → Aurora), some effects (a white bloom washed the screen during one play: likely an
+- Audio: AX command lists processed on the host; intro movies, menus and gameplay produce sound
+  (verified by recording, not yet by ear). Not modelled: polyphase SRC filter (cubic instead), ITD/HRTF,
+  low-pass filter, compressor; the title screen is silent (check whether that's correct).
+- Not yet: memory card (CARD → Aurora), some effects (a white bloom washed the screen during one play: likely an
   EFB copy / post effect), RVZ discs, first-run setup / packaging, options UI.

@@ -1,6 +1,7 @@
 // Windowed runner: Aurora (WebGPU + SDL3) on the main thread; the game runs on its own
 // host threads and hands each finished frame over through gx_bridge.
 #include "boot.h"
+#include "audio_out.h"
 #include "gx_bridge.h"
 #include "hw.h"
 #include "log.h"
@@ -13,6 +14,8 @@
 #include <aurora/event.h>
 #include <aurora/main.h>
 #include <SDL3/SDL_video.h>
+#include <SDL3/SDL_audio.h>
+#include <SDL3/SDL_init.h>
 #include <SDL3/SDL_scancode.h>
 #include <dolphin/gx.h>
 #include <dolphin/pad.h>
@@ -43,6 +46,35 @@ static void setDefaultKeys() {
   memcpy(b.buttons, buttons, sizeof(buttons));
   memcpy(b.axes, axes, sizeof(axes));
   if (!PADSetDefaultKeyBindings(0, &b)) LOG_WARN("could not set default keyboard bindings");
+}
+
+// Game audio (AI DMA output, 32 kHz stereo) to the default playback device.
+static SDL_AudioStream* g_audioStream = nullptr;
+
+static void audioSubmit(const int16_t* lr, uint32_t frames) {
+  SDL_PutAudioStreamData(g_audioStream, lr, (int)(frames * 4));
+}
+
+static uint32_t audioQueued() {
+  int bytes = SDL_GetAudioStreamQueued(g_audioStream);
+  return bytes > 0 ? (uint32_t)bytes / 4 : 0;
+}
+
+static void initAudio() {
+  if (getenv("BLITZ_MUTE")) return;
+  if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+    LOG_WARN("audio unavailable: %s", SDL_GetError());
+    return;
+  }
+  const SDL_AudioSpec spec{SDL_AUDIO_S16, 2, 32000};
+  g_audioStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+  if (!g_audioStream) {
+    LOG_WARN("could not open an audio device: %s", SDL_GetError());
+    return;
+  }
+  SDL_ResumeAudioStreamDevice(g_audioStream);
+  static const audioout::Sink sink{audioSubmit, audioQueued, 32000};
+  audioout::setSink(&sink);
 }
 
 // Samples host controllers into pad_input and applies the game's rumble requests.
@@ -133,6 +165,7 @@ int main(int argc, char** argv) {
   }
 
   gxbridge::init();
+  initAudio();
   hw::start();
   std::thread([] { sched::runMainThread(guest::g_boot.entry); }).detach();
 

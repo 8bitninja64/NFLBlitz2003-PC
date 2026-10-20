@@ -3,20 +3,23 @@
 // the vertical retrace interrupt, which runs the game's own __VIRetraceHandler).
 #include "hw.h"
 
+#include "audio_out.h"
 #include "boot.h"
+#include "dsp_ax.h"
 #include "log.h"
 #include "memory.h"
 #include "pad_input.h"
 #include "sched.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <mutex>
-#include <chrono>
 #include <thread>
+#include <vector>
 
 namespace hw {
 
@@ -205,14 +208,84 @@ void dspSendMail(uint32_t mail) {
   raiseDspInterrupt();
 }
 
+static bool g_axReady = false;    // the audio microcode task has been booted
+static bool g_axListNext = false;  // 0xBABE<size> received, list address follows
+
 static void mailToDsp(uint32_t mail) {
+  if (g_axReady) {
+    // AX protocol: 0xBABE<size>, then the command list address. Process it, then report
+    // the task resumed (MusyX's "DSP is done" callback).
+    if ((mail >> 16) == 0xBABE) {
+      g_axListNext = true;
+      return;
+    }
+    if (g_axListNext) {
+      g_axListNext = false;
+      ax::processCommandList(mail);
+      dspSendMail(0xDCD10001u);
+      return;
+    }
+  }
   if (g_mailLogBudget > 0) {
     g_mailLogBudget--;
     LOG_INFO("mail to DSP %08X", mail);
   }
   // Task boot: 0x80F3D001 <entry> is the last mail; the microcode then reports DSP_INIT.
-  if (g_lastMailToDsp == 0x80F3D001u) dspSendMail(0xDCD10000u);
+  if (g_lastMailToDsp == 0x80F3D001u) {
+    dspSendMail(0xDCD10000u);
+    g_axReady = true;
+  }
   g_lastMailToDsp = mail;
+}
+
+// --- AI DMA: plays the game's output buffers in real time ------------------------------
+// Each time a buffer starts, the AI DMA interrupt fires (the handler programs the next
+// one); the samples go to the host sink, whose queue paces the engine.
+constexpr int kInterruptAiDma = 5;  // __OS_INTERRUPT_DSP_AI
+static std::atomic<bool> g_aiDmaRunning{false};
+
+static void aiDmaThread() {
+  using namespace std::chrono;
+  std::vector<int16_t> host;
+  auto next = steady_clock::now();
+  for (;;) {
+    if (!(g_dsp[0x36 / 2] & 0x8000)) {
+      std::this_thread::sleep_for(milliseconds(1));
+      next = steady_clock::now();
+      continue;
+    }
+    uint32_t addr = ((uint32_t)g_dsp[0x30 / 2] << 16 | g_dsp[0x32 / 2]) & 0x01FFFFE0;
+    uint32_t bytes = (g_dsp[0x36 / 2] & 0x7FFF) * 32;
+    if (!bytes) bytes = 32;
+    sched::postIrq([](guest::Ctx& c) {
+      g_dsp[0x0A / 2] |= 0x08;  // AIDINT
+      uint32_t handler = sched::callGuest(c, kGetInterruptHandler, {kInterruptAiDma});
+      if (handler) sched::callGuest(c, handler, {kInterruptAiDma, 0});
+    });
+    uint32_t frames = bytes / 4;
+    host.resize(frames * 2);
+    const uint8_t* src = guest::g_mem + addr;
+    for (uint32_t i = 0; i < frames; i++) {
+      // Guest frames are big-endian, right channel first.
+      host[2 * i + 1] = (int16_t)(src[4 * i] << 8 | src[4 * i + 1]);
+      host[2 * i] = (int16_t)(src[4 * i + 2] << 8 | src[4 * i + 3]);
+    }
+    audioout::capture(host.data(), frames);
+    const audioout::Sink* sink = audioout::sink();
+    if (sink) {
+      // Keep ~3 buffers queued on the host device.
+      while (sink->queuedFrames() > frames * 3) std::this_thread::sleep_for(microseconds(500));
+      sink->submit(host.data(), frames);
+    } else {
+      next += nanoseconds((int64_t)frames * 1000000000ll / 32000);
+      std::this_thread::sleep_until(next);
+    }
+  }
+}
+
+static void startAiDma() {
+  bool expected = false;
+  if (g_aiDmaRunning.compare_exchange_strong(expected, true)) std::thread(aiDmaThread).detach();
 }
 
 static uint32_t dspRead(uint32_t off, int size) {
@@ -254,6 +327,7 @@ static void dspWrite(uint32_t off, uint32_t v, int size) {
     g_dsp[off / 2] = (uint16_t)v;
   }
   if (off == 0x28 || off == 0x2A) aramDma();  // writing the count starts the DMA
+  if (off == 0x36 && (g_dsp[0x36 / 2] & 0x8000)) startAiDma();
   if (off == 0x02 || (off == 0x00 && size == 4)) mailToDsp(dsp32(0));
 }
 
