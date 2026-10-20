@@ -9,6 +9,8 @@ param(
 )
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
+Add-Type -Name Dpi -Namespace Win32 -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
+[Win32.Dpi]::SetProcessDPIAware() | Out-Null   # capture physical pixels on scaled displays
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;

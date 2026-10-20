@@ -33,6 +33,7 @@ set(BLITZ_RUNTIME_SOURCES
   src/runtime/memory.cpp
   src/runtime/pad_input.cpp
   src/runtime/sched.cpp
+  src/runtime/settings.cpp
 )
 
 # Aurora: GX on WebGPU (Dawn) + SDL3 window/input.

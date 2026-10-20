@@ -7,6 +7,7 @@
 #include "log.h"
 #include "pad_input.h"
 #include "sched.h"
+#include "settings.h"
 
 #include "gx/fifo.hpp"  // Aurora internal: fifo::drain
 
@@ -16,13 +17,17 @@
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_audio.h>
 #include <SDL3/SDL_init.h>
+#include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_scancode.h>
 #include <dolphin/gx.h>
 #include <dolphin/pad.h>
+#include <dolphin/vi.h>
 
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -61,7 +66,7 @@ static uint32_t audioQueued() {
 }
 
 static void initAudio() {
-  if (getenv("BLITZ_MUTE")) return;
+  if (getenv("BLITZ_MUTE") || settings::get().mute) return;
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
     LOG_WARN("audio unavailable: %s", SDL_GetError());
     return;
@@ -72,6 +77,7 @@ static void initAudio() {
     LOG_WARN("could not open an audio device: %s", SDL_GetError());
     return;
   }
+  SDL_SetAudioStreamGain(g_audioStream, settings::get().volume / 100.0f);
   SDL_ResumeAudioStreamDevice(g_audioStream);
   static const audioout::Sink sink{audioSubmit, audioQueued, 32000};
   audioout::setSink(&sink);
@@ -91,19 +97,23 @@ static void pollPads() {
   padinput::publish(pads);
 }
 
-// 4:3 window at ~85% of the usable display height, centered. A window larger than the
-// display gets its presents throttled by Windows.
-static void fitWindowToDisplay(SDL_Window* win) {
+// Window at ~85% of the usable display height (16:9 with widescreen, else 4:3), centered.
+static void fitWindowToDisplay(SDL_Window* win, bool widescreen) {
   SDL_Rect usable;
   if (!win || !SDL_GetDisplayUsableBounds(SDL_GetDisplayForWindow(win), &usable)) return;
+  const int aw = widescreen ? 16 : 4, ah = widescreen ? 9 : 3;
   int h = usable.h * 85 / 100;
-  int w = h * 4 / 3;
+  int w = h * aw / ah;
   if (w > usable.w * 9 / 10) {
     w = usable.w * 9 / 10;
-    h = w * 3 / 4;
+    h = w * ah / aw;
   }
   SDL_SetWindowSize(win, w, h);
   SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+  int pw = 0, ph = 0;
+  SDL_GetWindowSizeInPixels(win, &pw, &ph);
+  LOG_INFO("window: usable %dx%d, size %dx%d, pixels %dx%d, display scale %.2f", usable.w, usable.h, w, h, pw, ph,
+           SDL_GetWindowDisplayScale(win));
 }
 
 static void auroraLog(AuroraLogLevel level, const char* module, const char* message, unsigned int len) {
@@ -116,30 +126,76 @@ static void auroraLog(AuroraLogLevel level, const char* module, const char* mess
   if (level == LOG_FATAL) abort();
 }
 
+static std::string userDataDir() {
+#ifdef _WIN32
+  const char* base = getenv("APPDATA");
+  std::string dir = std::string(base ? base : ".") + "/NFL Blitz 2003";
+#else
+  const char* home = getenv("HOME");
+  std::string dir = std::string(home ? home : ".") + "/.local/share/NFL Blitz 2003";
+#endif
+  std::error_code ec;
+  std::filesystem::create_directories(std::filesystem::u8path(dir), ec);
+  return dir;
+}
+
+static AuroraBackend backendFromSettings(const std::string& name) {
+  if (name == "vulkan") return BACKEND_VULKAN;
+  if (name == "d3d12") return BACKEND_D3D12;
+  if (name == "d3d11") return BACKEND_D3D11;
+#ifdef _WIN32
+  // Dawn's D3D12 and Vulkan presents ran at ~20 fps even for empty frames on the dev
+  // laptop (NVIDIA Optimus); D3D11 presents in ~4 ms.
+  return BACKEND_D3D11;
+#else
+  return BACKEND_AUTO;
+#endif
+}
+
+// Alt+Enter / F11: toggle fullscreen and remember it.
+static void handleHotkeys() {
+  static bool wasDown = false;
+  const bool* keys = SDL_GetKeyboardState(nullptr);
+  bool alt = keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT];
+  bool down = keys[SDL_SCANCODE_F11] || (alt && keys[SDL_SCANCODE_RETURN]);
+  if (down && !wasDown) {
+    bool fs = !VIGetWindowFullscreen();
+    VISetWindowFullscreen(fs);
+    settings::get().fullscreen = fs;
+    settings::save();
+  }
+  wasDown = down;
+}
+
+// Aspect ratio of the content framebuffer, which the bridge's projection patch targets.
+static void updateAspect() {
+  AuroraWindowSize ws = aurora_get_window_size();
+  float aspect = 4.0f / 3.0f;
+  if (settings::get().widescreen && ws.fb_width && ws.fb_height) aspect = (float)ws.fb_width / (float)ws.fb_height;
+  settings::g_displayAspect.store(aspect);
+}
+
 int main(int argc, char** argv) {
   if (!guest::bootFromArgs(argc, argv)) return 1;
+  settings::load(userDataDir() + "/settings.ini");
+  const settings::Settings& st = settings::get();
 
   AuroraConfig config{};
   config.appName = "NFL Blitz 2003";
   config.logCallback = auroraLog;
   config.logLevel = getenv("BLITZ_AURORA_DEBUG") ? LOG_DEBUG : LOG_INFO;
-  config.windowWidth = 1280;
-  config.windowHeight = 960;
-  config.vsync = getenv("BLITZ_VSYNC") != nullptr;  // the game paces itself on the VI retrace
-#ifdef _WIN32
-  // Dawn's D3D12 and Vulkan presents ran at ~20 fps even for empty frames on the dev
-  // laptop (NVIDIA Optimus); D3D11 presents in ~4 ms.
-  config.desiredBackend = BACKEND_D3D11;
-#endif
-  if (const char* b = getenv("BLITZ_BACKEND")) {  // d3d12 | vulkan | d3d11
-    if (!strcmp(b, "vulkan")) config.desiredBackend = BACKEND_VULKAN;
-    else if (!strcmp(b, "d3d12")) config.desiredBackend = BACKEND_D3D12;
-    else if (!strcmp(b, "d3d11")) config.desiredBackend = BACKEND_D3D11;
-  }
+  config.windowWidth = st.windowWidth > 0 ? (uint32_t)st.windowWidth : 1280;
+  config.windowHeight = st.windowHeight > 0 ? (uint32_t)st.windowHeight : 720;
+  config.vsync = st.vsync || getenv("BLITZ_VSYNC");  // the game paces itself on the VI retrace
+  config.msaa = st.msaa;
+  config.maxTextureAnisotropy = (uint16_t)st.anisotropy;
+  config.startFullscreen = st.fullscreen;
+  config.desiredBackend = backendFromSettings(getenv("BLITZ_BACKEND") ? getenv("BLITZ_BACKEND") : st.backend);
   config.mem1Size = 0;  // guest memory is owned by the runtime
   config.mem2Size = 0;
   aurora_initialize(argc, argv, &config);
-  fitWindowToDisplay(aurora_get_window());
+  if (st.windowWidth <= 0 || st.windowHeight <= 0) fitWindowToDisplay(aurora_get_window(), st.widescreen);
+  AuroraSetViewportPolicy(st.widescreen ? AURORA_VIEWPORT_STRETCH : AURORA_VIEWPORT_FIT);
   if (getenv("BLITZ_TOPMOST")) SDL_SetWindowAlwaysOnTop(aurora_get_window(), true);  // for screenshots
   // Aurora's GX state defaults; the game's own GXInit stream then sets everything it uses.
   static uint8_t auroraFifo[0x40000];
@@ -179,6 +235,8 @@ int main(int argc, char** argv) {
       ++event;
     }
     if (exiting) break;
+    handleHotkeys();
+    updateAspect();
     pollPads();
     if (!gxbridge::takeFrame(frame, 8)) continue;
     using clk = std::chrono::steady_clock;

@@ -3,6 +3,7 @@
 #include "gx_fifo.h"
 #include "log.h"
 #include "memory.h"
+#include "settings.h"
 
 #include <dolphin/gx/GXAurora.h>
 #include <dolphin/gx/GXCommandList.h>
@@ -63,6 +64,8 @@ private:
   }
 
   void bp(uint32_t v, const uint8_t* raw);
+  void xf(const uint8_t* p, uint32_t size);
+  uint32_t m_projType = 0;  // last XF 0x1026 (0 perspective, 1 orthographic)
   void cp(uint8_t reg, uint32_t v, const uint8_t* raw);
   void draw(const uint8_t* p, uint32_t size);
   void indexedXf(const uint8_t* p);
@@ -224,6 +227,17 @@ void Bridge::bp(uint32_t v, const uint8_t* raw) {
     putRaw(fixed, 5);
     return;
   }
+  case 0x4F:
+  case 0x50:
+    // The game clears to white; with 2D screens centered in a wider frame the cleared
+    // margins would show, so clear them to black instead (the alpha byte is kept).
+    if (settings::get().widescreen && settings::get().hud == settings::Hud2D::Centered) {
+      uint32_t nv = reg == 0x4F ? (v & 0xFFFFFF00u) : (v & 0xFF000000u);
+      const uint8_t fixed[5] = {0x61, (uint8_t)(nv >> 24), (uint8_t)(nv >> 16), (uint8_t)(nv >> 8), (uint8_t)nv};
+      putRaw(fixed, 5);
+      return;
+    }
+    break;
   case 0x49: m_copySrc = v; break;
   case 0x4A: m_copySize = v; break;
   case 0x4B: m_copyDest = field(v, 24, 0) << 5; break;
@@ -326,10 +340,50 @@ static bool dropped(const uint8_t* p) {
   return strstr(env, key) != nullptr;
 }
 
+// Widescreen: the content framebuffer has the window's aspect (Aurora STRETCH policy) and
+// the game's 4:3 projections are narrowed horizontally by (4/3) / aspect. Perspective (3D)
+// therefore sees more to the sides (Hor+); orthographic (2D) screens end up centered at
+// 4:3, or stay stretched if the user prefers.
+void Bridge::xf(const uint8_t* p, uint32_t size) {
+  uint32_t header = be32(p + 1);
+  uint32_t first = header & 0xFFFF, count = (header >> 16) + 1;
+  const settings::Settings& st = settings::get();
+  bool touchesProj = first <= 0x1026 && first + count > 0x1020;
+  if (!touchesProj || !st.widescreen) {
+    if (touchesProj && first + count > 0x1026) m_projType = be32(p + 5 + 4 * (0x1026 - first));
+    putRaw(p, size);
+    return;
+  }
+  if (first <= 0x1026 && first + count > 0x1026) m_projType = be32(p + 5 + 4 * (0x1026 - first));
+  float k = (4.0f / 3.0f) / settings::g_displayAspect.load();
+  if (m_projType == 1 && st.hud == settings::Hud2D::Stretched) k = 1.0f;
+  uint8_t buf[5 + 4 * 64];
+  if (size > sizeof(buf) || k == 1.0f) {
+    putRaw(p, size);
+    return;
+  }
+  memcpy(buf, p, size);
+  for (uint32_t reg : {0x1020u, 0x1021u}) {
+    if (reg < first || reg >= first + count) continue;
+    uint8_t* w = buf + 5 + 4 * (reg - first);
+    uint32_t bits = be32(w);
+    float f;
+    memcpy(&f, &bits, 4);
+    f *= k;
+    memcpy(&bits, &f, 4);
+    w[0] = (uint8_t)(bits >> 24);
+    w[1] = (uint8_t)(bits >> 16);
+    w[2] = (uint8_t)(bits >> 8);
+    w[3] = (uint8_t)bits;
+  }
+  putRaw(buf, size);
+}
+
 void Bridge::command(const uint8_t* p, uint32_t size) {
   uint8_t op = p[0];
   if (dropped(p)) return;
   switch (op) {
+  case 0x10: xf(p, size); return;
   case 0x61: bp(be32(p + 1), p); return;
   case 0x08: cp(p[1], be32(p + 2), p); return;
   case 0x20:

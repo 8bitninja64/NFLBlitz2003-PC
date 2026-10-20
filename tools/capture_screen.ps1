@@ -1,6 +1,8 @@
 # Screenshot of the primary screen: powershell -File tools/capture_screen.ps1 -Out build/screen.png
 param([string]$Out = "build/screen.png", [double]$Scale = 0.5)
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+Add-Type -Name Dpi -Namespace Win32 -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
+[Win32.Dpi]::SetProcessDPIAware() | Out-Null   # capture physical pixels on scaled displays
 $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
 $g = [System.Drawing.Graphics]::FromImage($bmp)
