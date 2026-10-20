@@ -6,6 +6,7 @@
 #include "boot.h"
 #include "log.h"
 #include "memory.h"
+#include "pad_input.h"
 #include "sched.h"
 
 #include <atomic>
@@ -144,6 +145,7 @@ static void viRetraceThread() {
     static uint32_t retrace = 0;
     sched::postIrq([context](guest::Ctx& c) {
       maybeDumpXfb(retrace++);
+      padinput::tick();
       uint32_t handler = sched::callGuest(c, kGetInterruptHandler, {kInterruptVI});
       if (!handler) return;
       setViReg(0x30, viReg(0x30) | 0x8000);  // DI0: display interrupt 0 fired

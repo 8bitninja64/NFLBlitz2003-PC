@@ -61,6 +61,38 @@ void dumpAllTraces() {
   for (auto& [name, ring] : g_rings) printRing(name, *ring);
 }
 
+#ifdef _WIN32
+#include <windows.h>
+
+static LONG WINAPI crashFilter(EXCEPTION_POINTERS* ep) {
+  static volatile LONG once = 0;
+  if (InterlockedExchange(&once, 1)) return EXCEPTION_CONTINUE_SEARCH;
+  const EXCEPTION_RECORD* er = ep->ExceptionRecord;
+  HMODULE mod = nullptr;
+  GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                     static_cast<LPCSTR>(er->ExceptionAddress), &mod);
+  char modName[MAX_PATH] = "?";
+  if (mod) GetModuleFileNameA(mod, modName, sizeof(modName));
+  logf(LogLevel::Fatal, "host exception %08lX at %p (%s+%llX)%s%llX", er->ExceptionCode, er->ExceptionAddress, modName,
+       (unsigned long long)((const char*)er->ExceptionAddress - (const char*)mod),
+       er->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ? " accessing " : " info ",
+       er->NumberParameters > 1 ? (unsigned long long)er->ExceptionInformation[1] : 0ull);
+  dumpCallTrace();
+  dumpAllTraces();
+  sched::dumpGuestStacks();
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
+void installCrashHandler() {
+#ifdef _WIN32
+  SetUnhandledExceptionFilter(crashFilter);
+  // Leave room to report a stack overflow on the faulting thread.
+  ULONG guarantee = 64 * 1024;
+  SetThreadStackGuarantee(&guarantee);
+#endif
+}
+
 void startWatchdog() {
   const char* s = getenv("BLITZ_WATCHDOG");
   if (!s) return;

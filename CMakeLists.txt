@@ -23,10 +23,12 @@ set(BLITZ_RUNTIME_SOURCES
   src/runtime/gx_fifo.cpp
   src/runtime/hle_dvd.cpp
   src/runtime/hle_os.cpp
+  src/runtime/hle_pad.cpp
   src/runtime/hle_thread.cpp
   src/runtime/hw.cpp
   src/runtime/log.cpp
   src/runtime/memory.cpp
+  src/runtime/pad_input.cpp
   src/runtime/sched.cpp
 )
 
@@ -44,6 +46,9 @@ endif()
 add_library(blitz_runtime STATIC ${BLITZ_RUNTIME_SOURCES})
 target_include_directories(blitz_runtime PUBLIC src/runtime)
 target_link_libraries(blitz_runtime PUBLIC blitz_game)
+if (WIN32)
+  target_link_libraries(blitz_runtime PUBLIC winmm)
+endif()
 
 # Headless runner: no graphics/audio, for bring-up of CPU/OS/HLE.
 add_executable(blitz_headless src/app/main_headless.cpp)
@@ -51,9 +56,10 @@ target_link_libraries(blitz_headless PRIVATE blitz_runtime)
 
 # The game: Aurora window, GX via gx_bridge.
 add_library(blitz_gx STATIC src/runtime/gx_bridge.cpp)
-target_link_libraries(blitz_gx PUBLIC blitz_runtime aurora::core aurora::gx aurora::vi)
+target_link_libraries(blitz_gx PUBLIC blitz_runtime aurora::core aurora::gx aurora::vi aurora::pad)
 add_executable(blitz src/app/main_window.cpp)
 target_link_libraries(blitz PRIVATE blitz_gx aurora::main)
+target_include_directories(blitz PRIVATE extern/aurora/lib)
 # Shared libraries (Dawn, DXC, SDL3, ...) next to the executable.
 add_custom_command(TARGET blitz POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:blitz> $<TARGET_FILE_DIR:blitz>

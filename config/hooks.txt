@@ -23,3 +23,12 @@ DVDGetDriveStatus
 DVDCancelAsync
 DVDCancel
 DVDCheckDisk
+# PAD (src/runtime/hle_pad.cpp)
+PADInit
+PADRead
+PADReset
+PADRecalibrate
+PADSetSpec
+PADControlMotor
+PADControlAllMotors
+PADSetSamplingCallback

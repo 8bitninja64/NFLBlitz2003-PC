@@ -12,6 +12,7 @@ void dumpCallTrace();                    // this host thread's recent guest func
 void dumpAllTraces();
 void registerTraceRing(const char* name);  // call on each host thread that runs guest code
 void startWatchdog();                    // BLITZ_WATCHDOG=<secs>: periodic trace dumps
+void installCrashHandler();              // logs host exceptions with guest traces
 
 #define LOG_DEBUG(...) \
   do { \

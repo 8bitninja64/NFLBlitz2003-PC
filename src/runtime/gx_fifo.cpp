@@ -5,6 +5,7 @@
 #include "memory.h"
 #include "sched.h"
 
+#include <cstring>
 #include <mutex>
 #include <vector>
 
@@ -88,7 +89,14 @@ void callDisplayList(uint32_t addr, uint32_t size, int depth) {
     LOG_WARN("GX: nested display list depth exceeded");
     return;
   }
-  const uint8_t* p = guest::ptr(0x80000000 | (addr & 0x01FFFFFF));
+  // The CP fetches display lists in 32-byte units: the low address/size bits are ignored.
+  addr &= 0x01FFFFE0;
+  size &= ~31u;
+  if (addr + size > guest::kMem1Size || size > 0x400000) {
+    LOG_ERROR("GX: display list %08X size %X outside MEM1, skipped", addr, size);
+    return;
+  }
+  const uint8_t* p = guest::ptr(0x80000000 | addr);
   uint32_t used = 0;
   parseBuffer(p, size, &used, depth + 1);
 }
@@ -124,8 +132,37 @@ uint32_t commandSize(const uint8_t* p, uint32_t n) {
   }
 }
 
+// Recent commands, dumped when the parser meets an unknown opcode (desync diagnosis).
+struct RecentCmd {
+  uint8_t bytes[12];
+  uint32_t size;
+  uint32_t vcdLo, vcdHi, vat[3];
+};
+RecentCmd g_recent[16];
+uint32_t g_recentPos = 0;
+
+void dumpRecent() {
+  for (uint32_t k = g_recentPos > 16 ? g_recentPos - 16 : 0; k < g_recentPos; k++) {
+    const RecentCmd& r = g_recent[k & 15];
+    LOG_ERROR("  cmd size %u: %02X %02X %02X %02X %02X %02X %02X %02X %02X  vcd %08X/%08X vat %08X %08X %08X", r.size,
+              r.bytes[0], r.bytes[1], r.bytes[2], r.bytes[3], r.bytes[4], r.bytes[5], r.bytes[6], r.bytes[7],
+              r.bytes[8], r.vcdLo, r.vcdHi, r.vat[0], r.vat[1], r.vat[2]);
+  }
+}
+
 void execute(const uint8_t* p, uint32_t size, int depth) {
   uint8_t op = p[0];
+  {
+    RecentCmd& r = g_recent[g_recentPos++ & 15];
+    memcpy(r.bytes, p, size < 12 ? size : 12);
+    r.size = size;
+    r.vcdLo = g_vcdLo;
+    r.vcdHi = g_vcdHi;
+    uint32_t vat = (op >= 0x80) ? (op & 7) : 0;
+    r.vat[0] = g_vat[0][vat];
+    r.vat[1] = g_vat[1][vat];
+    r.vat[2] = g_vat[2][vat];
+  }
   g_stats.commands++;
   switch (op) {
   case 0x08:
@@ -151,7 +188,16 @@ void parseBuffer(const uint8_t* p, uint32_t n, uint32_t* consumed, int depth) {
     uint32_t sz = commandSize(p + off, n - off);
     if (sz == 0) break;
     if (sz == 0xFFFFFFFF) {
-      LOG_ERROR("GX: unknown FIFO opcode %02X (skipping byte)", p[off]);
+      static int reported = 0;
+      if (reported++ < 3) {
+        LOG_ERROR("GX: unknown FIFO opcode %02X at offset %u of %u (depth %d); recent commands:", p[off], off, n, depth);
+        dumpRecent();
+        char hex[64 * 3 + 1];
+        uint32_t from = off >= 40 ? off - 40 : 0;
+        int h = 0;
+        for (uint32_t k = from; k < n && k < from + 64; k++) h += snprintf(hex + h, sizeof(hex) - h, "%02X ", p[k]);
+        LOG_ERROR("  bytes from offset %u: %s", from, hex);
+      }
       off++;
       continue;
     }

@@ -10,6 +10,7 @@
 #define XXH_STATIC_LINKING_ONLY
 #include <xxhash.h>
 
+#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -355,6 +356,10 @@ void Bridge::endFrame() {
     }
   }
   frameNo++;
+  static auto lastEnd = std::chrono::steady_clock::now();
+  static double sumWait = 0, sumGuest = 0;
+  auto t0 = std::chrono::steady_clock::now();
+  sumGuest += std::chrono::duration<double, std::milli>(t0 - lastEnd).count();
   m_dumpTextures = dump && frameNo == (uint32_t)atoi(dump);
   std::unique_lock lk(mutex);
   // Lockstep: wait for Aurora to finish the previous frame before handing over this one.
@@ -366,6 +371,13 @@ void Bridge::endFrame() {
   cv.notify_all();
   // ...and until it has consumed this one: it reads guest memory while processing.
   cv.wait(lk, [&] { return consumed || shutdown; });
+  lastEnd = std::chrono::steady_clock::now();
+  sumWait += std::chrono::duration<double, std::milli>(lastEnd - t0).count();
+  static const bool perf = getenv("BLITZ_PERF") != nullptr;
+  if (perf && frameNo % 100 == 0) {
+    LOG_INFO("gx frames: guest %.1f ms, handoff wait %.1f ms per frame", sumGuest / 100, sumWait / 100);
+    sumWait = sumGuest = 0;
+  }
   m_hashes.clear();
   if (getenv("BLITZ_DRAWS_BLOCKING")) {
     aurora(GX_AURORA_SET_DRAWS_BLOCKING);

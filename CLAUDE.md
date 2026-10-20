@@ -29,6 +29,8 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   - hw.cpp: register models that keep the SDK recompiled: EXI (instant), VI (59.94 Hz retrace runs
     the game's __VIRetraceHandler), DSP mailbox stand-in (boot handshake only) + real ARAM DMA, AI counter.
   - hle_dvd.cpp: DVDReadAsyncPrio etc. from the disc on a worker thread (DVDOpen stays recompiled).
+  - hle_pad.cpp + pad_input.cpp: PADRead etc. from a snapshot the window app fills from Aurora PAD
+    (SDL gamepads, GC adapter, keyboard) each loop; rumble goes back the same way. SI is not emulated.
   - gx_fifo.cpp: write-gather pipe → guest RAM at the PI FIFO pointer + GP command parser (CP/PE/PI
     models: draw-sync tokens, DrawDone, CP FIFO breakpoints — RenderWare paces frames with these).
   - gx_bridge.cpp: GP commands → Aurora FIFO (raw BP/CP/XF/draws pass through; texture/TLUT/array-base/
@@ -39,11 +41,23 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - `powershell -ExecutionPolicy Bypass -File tools/build.ps1 [-SkipRecomp] [-Configure] [-Target blitz]`
   (VS 2022 BuildTools env via tools/vsenv.ps1; clang-cl + Ninja; Aurora fetches Dawn/SDL3 prebuilts).
 - `build/windows-clang/blitz.exe [--disc <iso>] [-v]` (default disc: ./NFL Blitz 2003 (USA).iso).
+- Windows defaults to Dawn's D3D11 backend: D3D12/Vulkan presented at ~20 fps even for empty frames on
+  the dev laptop (NVIDIA Optimus). `BLITZ_BACKEND=d3d12|vulkan|d3d11` overrides;
+  `BLITZ_AURORA_BENCH=1` times a bare Aurora loop.
+- Keyboard (port 1): WASD stick, arrows D-pad, K=A, J=B, L=X, I=Y, Space=Z, Q/E=L/R, Enter=Start,
+  numpad 8/4/2/6 C-stick. Gamepads use Aurora's default mappings.
+- `tools/recomp/xref.py <addr|name>...` lists direct callers/callees with symbol names.
 - Screenshots: `tools/capture_window.ps1 -Seconds N -Out build/x.png` (sets BLITZ_TOPMOST; a covered
   window captures as white) or `tools/capture_screen.ps1`.
 
 ## Debugging
 - `BLITZ_WATCHDOG=<s>`: per-thread last functions + loop back-edge, guest back-chain stacks, GX stats.
+  Host crashes are logged with the same traces (crash filter in log.cpp).
+- `BLITZ_INPUT="<retrace>:<BTN[+BTN]>[*hold],..."` scripted port-1 input (A B X Y Z L R START UP DOWN
+  LEFT RIGHT STICKUP/DOWN/LEFT/RIGHT). Reaching a match from boot (title ~22 s at 60 fps):
+  START every 60 from 1300 (x12), A at 2200 and 2400 (continue without card), START every 60 from 2700
+  (x6), then A every 120 from 3800.
+- `BLITZ_PERF=1` logs guest vs handoff time per frame and Aurora begin/process/end times.
 - `BLITZ_PEEK=addr,...` guest words in each watchdog dump. `BLITZ_XFB_DUMP=<retrace>[,n]` XFB → PPM
   (`tools/ppm2png.py`). `BLITZ_GX_DUMP=<frame>` translated stream → build/gxframe_N.bin
   (`tools/gxdump.py [--all]`) plus bound textures (`tools/tex2png.py`). `BLITZ_GX_DROP=bp59,xf1018,...`
@@ -56,6 +70,9 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - Aurora's BP 0x59 (scissor box offset) sign convention is the opposite of hardware; the bridge negates it.
 - Aurora needs its own GXInit called once (defaults); the game's stream then overrides it.
 - Hardware GX has no vertex array sizes: the bridge sizes them from each draw's max index.
+- RenderWare calls display lists at unaligned addresses/sizes: the CP ignores the low 5 bits.
+- The game cancels and re-creates threads in the same OSThread struct: the scheduler retires the old record.
+- Windows timer resolution is raised to 1 ms at startup (retrace pacing).
 - Don't write C/C++ with escapes through bash heredocs/python-in-bash; use the Write/Edit tools.
 
 ## Known addresses (USA)
@@ -64,9 +81,9 @@ main 8001B2F0. RenderWare frame queue at r13-0x5A5C.. (8020F370 retire, 8020F42C
 Library layout: game ..8017A0C4, TRK, MSL/runtime 8018114C, SDK 801905D4..801B79D8, MusyX ..801D139C,
 RenderWare 801D13C8..80227364.
 
-## Status (2026-10-20)
-- Boots and runs the attract sequence in a window: Midway Sports and Point of View intro movies (MVDV,
-  decoded by the recompiled game), NFL Blitz 2003 logo/legal screens; rendering is correct.
-- Not yet: controller input (PAD/SI), audio (MusyX DSP microcode → host mixer; the stand-in DSP only
-  does the boot handshake), memory card (CARD → Aurora), speed (~20 fps presented: lockstep handoff +
-  unoptimized codegen), RVZ discs, first-run setup / packaging.
+## Status (2026-10-21)
+- Plays: boots, intro movies, title/attract, memory-card check (no card → continue without save), main
+  menu, Quickplay team matchup, and in-game football with working input, at the game's full 60 fps.
+- Not yet: audio (MusyX DSP microcode → host mixer; the stand-in DSP only does the boot handshake),
+  memory card (CARD → Aurora), some effects (a white bloom washed the screen during one play: likely an
+  EFB copy / post effect), RVZ discs, first-run setup / packaging, options UI.

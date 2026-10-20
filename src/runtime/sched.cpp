@@ -7,6 +7,7 @@
 #include "func_table.h"
 #include "log.h"
 
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -190,6 +191,8 @@ static void threadMain(Thread* t) {
     exitCurrent(c, c.r[3]);
   } catch (ThreadExit&) {
   }
+  t->ctx = nullptr;
+  LOG_INFO("guest thread %08X ended", t->addr);
 }
 
 Thread* create(uint32_t guestThread, uint32_t entry, uint32_t param, uint32_t stackTop, int priority, bool detached) {
@@ -204,6 +207,21 @@ Thread* create(uint32_t guestThread, uint32_t entry, uint32_t param, uint32_t st
   t->suspendCount = 1;
   t->detached = detached;
   std::lock_guard lk(g_m);
+  // Games re-create threads in the same OSThread after exiting/cancelling them: the old
+  // record must stop answering to that address.
+  for (auto it = g_threads.begin(); it != g_threads.end();) {
+    Thread* old = *it;
+    if (old->addr == guestThread && old != g_main) {
+      if (old->state != State::Moribund)
+        LOG_WARN("OSCreateThread %08X: thread still alive, replacing it", guestThread);
+      old->state = State::Moribund;
+      old->cancelled = true;
+      old->cv.notify_one();
+      it = g_threads.erase(it);  // the Thread object is leaked: its host thread may still unwind
+    } else {
+      ++it;
+    }
+  }
   g_threads.push_back(t);
   syncGuest(t);
   return t;
@@ -278,6 +296,7 @@ void exitCurrent(guest::Ctx& c, uint32_t value) {
 }
 
 void cancel(guest::Ctx& c, Thread* t) {
+  LOG_INFO("OSCancelThread %08X", t->addr);
   if (t == current()) exitCurrent(c, 0);
   std::lock_guard lk(g_m);
   t->state = State::Moribund;
@@ -340,10 +359,14 @@ void reacquireCpu(guest::Ctx& c) {
 // Debug: guest call stacks from the PowerPC back chain (racy reads; diagnostics only).
 void dumpGuestStacks() {
   std::vector<Thread*> ts;
-  {
-    std::lock_guard lk(g_m);
-    ts = g_threads;
+  bool locked = false;
+  for (int i = 0; i < 100 && !(locked = g_m.try_lock()); i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  if (!locked) {
+    logf(LogLevel::Error, "scheduler lock held for over 1 s (deadlock?); running %08X", g_running ? g_running->addr : 0);
+    return;
   }
+  ts = g_threads;
+  g_m.unlock();
   for (Thread* t : ts) {
     if (!t->ctx) continue;
     char line[512];
