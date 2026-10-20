@@ -18,6 +18,7 @@ struct Settings {
   bool vsync = false;
   uint32_t msaa = 4;            // 1, 2, 4, 8
   uint32_t anisotropy = 16;     // 1..16
+  float resolutionScale = 0.0f;  // 0: render at the window size; N: N x 480 lines (3 = 1440p)
   std::string backend = "auto";  // auto | d3d11 | d3d12 | vulkan
   int windowWidth = 0, windowHeight = 0;  // 0: fit to the display
   // Audio

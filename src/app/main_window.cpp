@@ -173,6 +173,12 @@ static void updateAspect() {
   float aspect = 4.0f / 3.0f;
   if (settings::get().widescreen && ws.fb_width && ws.fb_height) aspect = (float)ws.fb_width / (float)ws.fb_height;
   settings::g_displayAspect.store(aspect);
+  static uint32_t lastW = 0, lastH = 0;
+  if (ws.fb_width != lastW || ws.fb_height != lastH) {
+    lastW = ws.fb_width;
+    lastH = ws.fb_height;
+    LOG_INFO("render target %ux%u (window %ux%u)", ws.fb_width, ws.fb_height, ws.native_fb_width, ws.native_fb_height);
+  }
 }
 
 int main(int argc, char** argv) {
@@ -196,6 +202,7 @@ int main(int argc, char** argv) {
   aurora_initialize(argc, argv, &config);
   if (st.windowWidth <= 0 || st.windowHeight <= 0) fitWindowToDisplay(aurora_get_window(), st.widescreen);
   AuroraSetViewportPolicy(st.widescreen ? AURORA_VIEWPORT_STRETCH : AURORA_VIEWPORT_FIT);
+  if (st.resolutionScale > 0.0f) VISetFrameBufferScale(st.resolutionScale);  // N x 480 lines
   if (getenv("BLITZ_TOPMOST")) SDL_SetWindowAlwaysOnTop(aurora_get_window(), true);  // for screenshots
   // Aurora's GX state defaults; the game's own GXInit stream then sets everything it uses.
   static uint8_t auroraFifo[0x40000];

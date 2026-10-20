@@ -29,6 +29,7 @@ static void applySetting(const std::string& key, const std::string& v) {
   else if (key == "msaa") s.msaa = (uint32_t)atoi(v.c_str());
   else if (key == "anisotropy") s.anisotropy = (uint32_t)atoi(v.c_str());
   else if (key == "backend") s.backend = v;
+  else if (key == "resolution_scale") s.resolutionScale = (float)atof(v.c_str());
   else if (key == "window_width") s.windowWidth = atoi(v.c_str());
   else if (key == "window_height") s.windowHeight = atoi(v.c_str());
   else if (key == "volume") s.volume = atoi(v.c_str());
@@ -41,6 +42,8 @@ static void sanitize() {
   if (s.msaa != 1 && s.msaa != 2 && s.msaa != 4 && s.msaa != 8) s.msaa = 4;
   if (s.anisotropy < 1) s.anisotropy = 1;
   if (s.anisotropy > 16) s.anisotropy = 16;
+  if (s.resolutionScale < 0.0f) s.resolutionScale = 0.0f;
+  if (s.resolutionScale > 8.0f) s.resolutionScale = 8.0f;
   if (s.volume < 0) s.volume = 0;
   if (s.volume > 100) s.volume = 100;
 }
@@ -75,6 +78,9 @@ void load(const std::string& p) {
     }
   }
   sanitize();
+  // Rewrite so options added by newer versions show up in the file (BLITZ_SET values too,
+  // which is why tests use it sparingly).
+  if (!getenv("BLITZ_SET")) save();
 }
 
 void save() {
@@ -93,6 +99,7 @@ void save() {
       << "vsync = " << (s.vsync ? "on" : "off") << "\n"
       << "msaa = " << s.msaa << "   # 1 2 4 8\n"
       << "anisotropy = " << s.anisotropy << "   # 1..16\n"
+      << "resolution_scale = " << s.resolutionScale << "   # 0 = window size; N = N x 480 lines (3 = 1440p, 4.5 = 2160p)\n"
       << "backend = " << s.backend << "   # auto | d3d11 | d3d12 | vulkan\n"
       << "window_width = " << s.windowWidth << "   # 0 = fit to the display\n"
       << "window_height = " << s.windowHeight << "\n"
