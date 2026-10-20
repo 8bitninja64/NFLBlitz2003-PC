@@ -44,6 +44,10 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
     models: draw-sync tokens, DrawDone, CP FIFO breakpoints — RenderWare paces frames with these).
   - gx_bridge.cpp: GP commands → Aurora FIFO (raw BP/CP/XF/draws pass through; texture/TLUT/array-base/
     EFB-copy registers become GX_AURORA commands with host pointers; display copy ends a frame; lockstep).
+- Game module: the generated code builds as blitz_game.dll. module_abi.h is the ABI (RuntimeApi in:
+  memory, MMIO, CPU helpers, HLE table; GameModule out: function table, entry, HLE names, DOL hash);
+  module_rt.cpp is the DLL side, module_loader.cpp the runtime side (BLITZ_MODULE=<path> overrides).
+  HLE(name) self-registers; the loader resolves the module's HLE names and checks the DOL hash.
 - `src/app/main_window.cpp` (NFLBlitz2003.exe: Aurora window, audio, pads, hotkeys, disc picker, texture
   packs), `overlay.cpp` (F1 ImGui settings menu, FPS counter), `main_headless.cpp` (blitz_headless.exe).
 - `src/runtime/settings.*`: settings.ini in %APPDATA%/NFL Blitz 2003 (BLITZ_SET="k=v;k=v" overrides).
@@ -77,7 +81,11 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   drops register loads (bisecting state bugs).
 - `BLITZ_MEMWATCH=1` logs (and saves to build/leakframe.bin) any frame whose processing grows the process
   by > 256 MB. `BLITZ_GX_NOTEX` / `BLITZ_GX_NOCOPY` drop texture binds / EFB copies (bisecting).
-- `BLITZ_MENU_AT=<s>` opens the F1 menu after N seconds (screenshots).
+- `BLITZ_MENU_AT=<s>` opens the F1 menu after N seconds, `BLITZ_MENU_TAB=Controls` picks its tab (screenshots).
+- `BLITZ_GX_RING=<n>` keeps the last n translated frames; creating build/gxdump.trigger writes them to
+  build/ring and dumps the next frame's textures + TLUTs. `tools/brightscan.py` uses it to catch the
+  glare. Runs are not deterministic (same input script, different draw counts at the same frame),
+  so match dumps to screenshots within one run. `tools/gxdraws.py` groups draws by blend/z/texture.
 - `-DBLITZ_AURORA_CHECKS=ON` builds Aurora GX with its debug validation (FATALs on odd-but-legal state).
 - Aurora persists pipelines in %APPDATA%/NFL Blitz 2003/pipeline_cache.db: a bad pipeline from an
   experiment is replayed at every start, so delete it when debugging shader/state crashes.
@@ -110,5 +118,6 @@ RenderWare 801D13C8..80227364.
 - Audio: AX command lists processed on the host (verified by recording, not yet by ear). Not modelled:
   polyphase SRC filter (cubic instead), ITD/HRTF, low-pass filter, compressor; the title is silent.
 - Memory card: detection, mount/check, directory and open work; writing a save not yet exercised.
+- Code split: blitz_game.dll (recompiled game) + runtime exe; F1 Controls tab rebinds keyboard keys.
 - Open: bright white glare during the stadium intro / some plays (additive and dst-alpha blending:
   compare with real hardware footage); RVZ discs; redistributable first-run compile setup.

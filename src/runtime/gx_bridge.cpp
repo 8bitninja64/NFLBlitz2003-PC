@@ -16,6 +16,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <filesystem>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -105,6 +107,7 @@ private:
   uint64_t m_invalidates = 0, m_invalidatedBytes = 0;
   uint32_t m_bp41 = 0, m_bpF3 = 0, m_bp42 = 0, m_bp43 = 0;
   std::unordered_map<uint64_t, uint32_t> m_blendHist;
+  std::deque<std::pair<uint32_t, std::vector<uint8_t>>> m_ring;  // BLITZ_GX_RING
 
   // Per-frame content hashes (texture/TLUT versions).
   std::unordered_map<uint64_t, uint32_t> m_hashes;
@@ -178,6 +181,14 @@ void Bridge::flushTextures() {
         put16(it->second.entries);
         put32(it->second.phys | 0x80000000u);
         put32(contentVersion(it->second.phys, it->second.entries * 2));
+        if (m_dumpTextures) {
+          char name[96];
+          snprintf(name, sizeof(name), "build/tlut_%08X_%u_f%u.bin", it->second.phys, it->second.entries, tlutFmt);
+          if (FILE* f = fopen(name, "wb")) {
+            fwrite(hostPhys(it->second.phys), 1, it->second.entries * 2, f);
+            fclose(f);
+          }
+        }
       }
       tlut = (uint32_t)slot;
     }
@@ -468,6 +479,29 @@ void Bridge::endFrame() {
       LOG_INFO("wrote %s (%zu bytes)", name, m_out.size());
     }
   }
+  // BLITZ_GX_RING=<n>: keep the last n streams; creating build/gxdump.trigger writes them out
+  // (build/ring/gxframe_N.bin) and dumps the next frame's textures. Catches rare effects.
+  static const int ringSize = getenv("BLITZ_GX_RING") ? atoi(getenv("BLITZ_GX_RING")) : 0;
+  bool ringTriggered = false;
+  if (ringSize > 0) {
+    m_ring.emplace_back(frameNo, m_out);
+    if ((int)m_ring.size() > ringSize) m_ring.pop_front();
+    if (frameNo % 10 == 0 && std::filesystem::exists("build/gxdump.trigger")) {
+      std::error_code ec;
+      std::filesystem::remove("build/gxdump.trigger", ec);
+      std::filesystem::create_directories("build/ring", ec);
+      for (auto& [n, data] : m_ring) {
+        char name[64];
+        snprintf(name, sizeof(name), "build/ring/gxframe_%u.bin", n);
+        if (FILE* f = fopen(name, "wb")) {
+          fwrite(data.data(), 1, data.size(), f);
+          fclose(f);
+        }
+      }
+      LOG_INFO("wrote GX ring: frames %u..%u", m_ring.front().first, m_ring.back().first);
+      ringTriggered = true;
+    }
+  }
   if (!m_blendHist.empty()) {
     std::string line;
     for (auto& [k, n] : m_blendHist) {
@@ -483,7 +517,7 @@ void Bridge::endFrame() {
   static double sumWait = 0, sumGuest = 0;
   auto t0 = std::chrono::steady_clock::now();
   sumGuest += std::chrono::duration<double, std::milli>(t0 - lastEnd).count();
-  m_dumpTextures = dump && frameNo == dumpFirst;
+  m_dumpTextures = (dump && frameNo == dumpFirst) || ringTriggered;
   std::unique_lock lk(mutex);
   // Lockstep: wait for Aurora to finish the previous frame before handing over this one.
   cv.wait(lk, [&] { return consumed || shutdown; });

@@ -119,4 +119,5 @@ def main():
     print(sorted(counts.items()))
 
 
-main()
+if __name__ == '__main__':
+    main()

@@ -37,10 +37,14 @@ The build extracts the executable from the ISO (place it in the repository root,
 `-Disc <path>`), analyzes it, recompiles it and compiles the port. Aurora downloads its Dawn and SDL3
 dependencies on the first configure.
 
+The recompiled game code is built as `blitz_game.dll` (the "game module"), separate from the
+runtime in `NFLBlitz2003.exe`; the runtime checks at startup that the module was built from the
+disc being played.
+
 Run `build/windows-clang/NFLBlitz2003.exe`. On first start it looks for the disc next to the
 executable or in the working directory, otherwise it asks for it; the path is remembered.
 
-**Do not redistribute the built executable**: it contains code translated from the game. A
+**Do not redistribute `blitz_game.dll`** (or a build folder containing it): it contains code translated from the game. A
 redistributable setup (shipping the recompiler and compiling on the user's machine from their disc,
 as the Luigi's Mansion PC port does) is planned.
 
@@ -55,6 +59,8 @@ as the Luigi's Mansion PC port does) is planned.
 | L / R | Q / E |
 | Start | Enter |
 | C-stick | Numpad 8 4 2 6 |
+
+Keyboard keys can be rebound in the F1 menu (Controls tab).
 
 F1: settings menu · Alt+Enter or F11: fullscreen
 

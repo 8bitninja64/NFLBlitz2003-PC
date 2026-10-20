@@ -1,6 +1,6 @@
 """Runs the game with scripted input several times and keeps screenshots that are much
 brighter than usual (looking for the white glare/bloom). Frame numbers are drawn on screen
-(BLITZ_FRAMENO) so a kept shot can be matched to a BLITZ_GX_DUMP frame.
+(BLITZ_FRAMENO); each kept shot also triggers a BLITZ_GX_RING dump to build/ring.
 
 Usage: python -I tools/brightscan.py <runs> <start_s> <end_s> <threshold>
 """
@@ -63,7 +63,7 @@ def main():
     runs, start, end, threshold = int(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])
     os.makedirs(OUT, exist_ok=True)
     script = open(os.path.join(ROOT, 'build', 'soak_input.txt')).read().strip()
-    env = dict(os.environ, BLITZ_FRAMENO='1', BLITZ_INPUT=script, BLITZ_TOPMOST='1')
+    env = dict(os.environ, BLITZ_FRAMENO='1', BLITZ_INPUT=script, BLITZ_TOPMOST='1', BLITZ_GX_RING='90')
     for run in range(runs):
         proc = subprocess.Popen([EXE], cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         t0 = time.time()
@@ -78,6 +78,8 @@ def main():
             if m >= threshold:
                 keep = os.path.join(OUT, f'run{run}_{n:03d}_{int(m)}.png')
                 shutil.copy(shot, keep)
+                # The bridge writes its last frames to build/ring and dumps the next frame's textures.
+                open(os.path.join(ROOT, 'build', 'gxdump.trigger'), 'w').close()
                 print(f'run {run} t={time.time() - t0:.0f}s brightness {m:.0f} -> {keep}', flush=True)
             n += 1
         proc.kill()
