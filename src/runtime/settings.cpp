@@ -22,7 +22,8 @@ static bool parseBool(const std::string& v) { return v == "1" || v == "true" || 
 
 static void applySetting(const std::string& key, const std::string& v) {
   Settings& s = g_settings;
-  if (key == "widescreen") s.widescreen = parseBool(v);
+  if (key == "disc") s.disc = v;
+  else if (key == "widescreen") s.widescreen = parseBool(v);
   else if (key == "hud") s.hud = v == "stretched" ? Hud2D::Stretched : Hud2D::Centered;
   else if (key == "fullscreen") s.fullscreen = parseBool(v);
   else if (key == "vsync") s.vsync = parseBool(v);
@@ -92,6 +93,8 @@ void save() {
     return;
   }
   out << "# NFL Blitz 2003 PC settings\n"
+      << "\n[game]\n"
+      << "disc = " << s.disc << "   # your NFL Blitz 2003 (USA) disc image\n"
       << "\n[display]\n"
       << "widescreen = " << (s.widescreen ? "on" : "off") << "   # Hor+ 3D at the window's aspect ratio\n"
       << "hud = " << (s.hud == Hud2D::Stretched ? "stretched" : "centered") << "   # 2D screens: centered | stretched\n"

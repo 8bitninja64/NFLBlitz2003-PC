@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 
 namespace gxbridge {
@@ -100,6 +101,8 @@ private:
   uint32_t m_copySrc = 0, m_copySize = 0, m_copyDest = 0;
 
   bool m_dumpTextures = false;
+  uint32_t m_bp41 = 0, m_bpF3 = 0, m_bp42 = 0, m_bp43 = 0;
+  std::unordered_map<uint64_t, uint32_t> m_blendHist;
 
   // Per-frame content hashes (texture/TLUT versions).
   std::unordered_map<uint64_t, uint32_t> m_hashes;
@@ -238,6 +241,10 @@ void Bridge::bp(uint32_t v, const uint8_t* raw) {
       return;
     }
     break;
+  case 0x41: m_bp41 = v & 0xFFFFFF; break;
+  case 0xF3: m_bpF3 = v & 0xFFFFFF; break;
+  case 0x42: m_bp42 = v & 0xFFFFFF; break;
+  case 0x43: m_bp43 = v & 0xFFFFFF; break;
   case 0x49: m_copySrc = v; break;
   case 0x4A: m_copySize = v; break;
   case 0x4B: m_copyDest = field(v, 24, 0) << 5; break;
@@ -284,6 +291,9 @@ void Bridge::cp(uint8_t reg, uint32_t v, const uint8_t* raw) {
 
 void Bridge::draw(const uint8_t* p, uint32_t size) {
   flushTextures();
+  // BLITZ_BLEND_LOG: per-frame histogram of (blend mode BP 0x41, alpha compare BP 0xF3, pixel format BP 0x43).
+  static const bool blendLog = getenv("BLITZ_BLEND_LOG") != nullptr;
+  if (blendLog) m_blendHist[(uint64_t)(m_bp41 & 0xFFFF) << 32 | (m_bpF3 & 0xFFFFFF)]++;
   uint32_t vat = p[0] & 7;
   uint32_t count = (uint32_t)p[1] << 8 | p[2];
   gxfifo::Attr attrs[gxfifo::kNumAttrs];
@@ -408,6 +418,16 @@ void Bridge::endFrame() {
       fclose(f);
       LOG_INFO("wrote %s (%zu bytes)", name, m_out.size());
     }
+  }
+  if (!m_blendHist.empty()) {
+    std::string line;
+    for (auto& [k, n] : m_blendHist) {
+      char b[64];
+      snprintf(b, sizeof(b), " cm0=%04X ac=%06X x%u", (unsigned)(k >> 32), (unsigned)(k & 0xFFFFFF), n);
+      line += b;
+    }
+    LOG_INFO("blend frame %u pe=%06X cm1=%06X:%s", frameNo, m_bp43, m_bp42, line.c_str());
+    m_blendHist.clear();
   }
   frameNo++;
   static auto lastEnd = std::chrono::steady_clock::now();

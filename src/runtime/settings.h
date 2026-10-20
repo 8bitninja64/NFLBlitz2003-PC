@@ -11,6 +11,7 @@ namespace settings {
 enum class Hud2D { Centered, Stretched };
 
 struct Settings {
+  std::string disc;  // path of the user's disc image (remembered after the first pick)
   // Display
   bool widescreen = true;      // Hor+ 3D at the window's aspect ratio
   Hud2D hud = Hud2D::Centered;  // 2D (orthographic) screens: 4:3 centered or stretched

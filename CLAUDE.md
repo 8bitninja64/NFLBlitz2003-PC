@@ -49,7 +49,7 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 ## Build / run
 - `powershell -ExecutionPolicy Bypass -File tools/build.ps1 [-SkipRecomp] [-Configure] [-Target blitz]`
   (VS 2022 BuildTools env via tools/vsenv.ps1; clang-cl + Ninja; Aurora fetches Dawn/SDL3 prebuilts).
-- `build/windows-clang/blitz.exe [--disc <iso>] [-v]` (default disc: ./NFL Blitz 2003 (USA).iso).
+- `build/windows-clang/NFLBlitz2003.exe [--disc <iso>] [-v]` (default disc: ./NFL Blitz 2003 (USA).iso).
 - Windows defaults to Dawn's D3D11 backend: D3D12/Vulkan presented at ~20 fps even for empty frames on
   the dev laptop (NVIDIA Optimus). `BLITZ_BACKEND=d3d12|vulkan|d3d11` overrides;
   `BLITZ_AURORA_BENCH=1` times a bare Aurora loop.

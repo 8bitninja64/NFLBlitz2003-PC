@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace guest {
 
@@ -13,7 +14,13 @@ struct BootInfo {
 };
 extern BootInfo g_boot;
 
-bool bootFromArgs(int argc, char** argv);  // disc, memory, devices, DOL (boot_args.cpp)
+struct BootOptions {
+  std::string rememberedDisc;                       // from settings
+  std::string (*pickDisc)() = nullptr;              // asks the user; "" = cancelled
+  void (*showError)(const std::string&) = nullptr;  // user-facing error
+  std::string chosenDisc;                           // out: the disc that was opened
+};
+bool bootFromArgs(int argc, char** argv, BootOptions* opts = nullptr);  // disc, memory, devices, DOL
 bool loadDol();
 bool setupLowMemory();
 uint32_t allocReserved(uint32_t size);  // guest stacks etc. for host-created contexts

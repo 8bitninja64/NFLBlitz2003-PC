@@ -64,6 +64,10 @@ target_link_libraries(blitz_gx PUBLIC blitz_runtime aurora::core aurora::gx auro
 add_executable(blitz src/app/main_window.cpp)
 target_link_libraries(blitz PRIVATE blitz_gx aurora::main)
 target_include_directories(blitz PRIVATE extern/aurora/lib)
+if (WIN32)
+  target_link_libraries(blitz PRIVATE comdlg32)
+  set_target_properties(blitz PROPERTIES OUTPUT_NAME "NFLBlitz2003")
+endif()
 # Shared libraries (Dawn, DXC, SDL3, ...) next to the executable.
 add_custom_command(TARGET blitz POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:blitz> $<TARGET_FILE_DIR:blitz>

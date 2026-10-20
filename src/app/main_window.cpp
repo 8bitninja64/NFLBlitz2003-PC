@@ -11,6 +11,13 @@
 
 #include "gx/fifo.hpp"  // Aurora internal: fifo::drain
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <commdlg.h>
+#endif
+
 #include <aurora/aurora.h>
 #include <aurora/event.h>
 #include <aurora/main.h>
@@ -181,10 +188,57 @@ static void updateAspect() {
   }
 }
 
+#ifdef _WIN32
+static std::wstring widen(const std::string& s) {
+  int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+  std::wstring w(n > 0 ? n - 1 : 0, L'\0');
+  if (n > 1) MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
+  return w;
+}
+
+static std::string narrow(const wchar_t* w) {
+  int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+  std::string s(n > 0 ? n - 1 : 0, '\0');
+  if (n > 1) WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), n, nullptr, nullptr);
+  return s;
+}
+
+static std::string pickDisc() {
+  wchar_t file[MAX_PATH] = L"";
+  OPENFILENAMEW ofn{};
+  ofn.lStructSize = sizeof(ofn);
+  ofn.lpstrTitle = L"Select your NFL Blitz 2003 (USA) GameCube disc image";
+  ofn.lpstrFilter = L"GameCube disc image (*.iso;*.gcm)\0*.iso;*.gcm\0All files\0*.*\0";
+  ofn.lpstrFile = file;
+  ofn.nMaxFile = MAX_PATH;
+  ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+  return GetOpenFileNameW(&ofn) ? narrow(file) : std::string();
+}
+
+static void showError(const std::string& msg) {
+  MessageBoxW(nullptr, widen(msg).c_str(), L"NFL Blitz 2003", MB_OK | MB_ICONERROR);
+}
+#endif
+
 int main(int argc, char** argv) {
-  if (!guest::bootFromArgs(argc, argv)) return 1;
   settings::load(userDataDir() + "/settings.ini");
-  const settings::Settings& st = settings::get();
+  settings::Settings& st = settings::get();
+  guest::BootOptions boot;
+  boot.rememberedDisc = st.disc;
+#ifdef _WIN32
+  boot.pickDisc = pickDisc;
+  boot.showError = showError;
+#endif
+  if (!guest::bootFromArgs(argc, argv, &boot)) return 1;
+  if (!getenv("BLITZ_DISC")) {
+    std::error_code ec;
+    auto u8 = std::filesystem::absolute(std::filesystem::u8path(boot.chosenDisc), ec).u8string();
+    std::string abs(reinterpret_cast<const char*>(u8.c_str()), u8.size());
+    if (!ec && abs != st.disc) {
+      st.disc = abs;
+      settings::save();
+    }
+  }
 
   AuroraConfig config{};
   config.appName = "NFL Blitz 2003";

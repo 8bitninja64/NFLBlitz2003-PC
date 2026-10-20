@@ -3,7 +3,7 @@
 param(
   [int]$Seconds = 15,
   [string]$Out = "build/shot.png",
-  [string]$Exe = "build/windows-clang/blitz.exe",
+  [string]$Exe = "build/windows-clang/NFLBlitz2003.exe",
   [string]$ExeArgs = "",
   [string]$Log = "build/run_window.log"
 )
