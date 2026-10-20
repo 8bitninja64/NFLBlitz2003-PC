@@ -44,7 +44,9 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
     models: draw-sync tokens, DrawDone, CP FIFO breakpoints — RenderWare paces frames with these).
   - gx_bridge.cpp: GP commands → Aurora FIFO (raw BP/CP/XF/draws pass through; texture/TLUT/array-base/
     EFB-copy registers become GX_AURORA commands with host pointers; display copy ends a frame; lockstep).
-- `src/app/main_window.cpp` (blitz.exe, Aurora window) and `main_headless.cpp` (blitz_headless.exe).
+- `src/app/main_window.cpp` (NFLBlitz2003.exe: Aurora window, audio, pads, hotkeys, disc picker, texture
+  packs), `overlay.cpp` (F1 ImGui settings menu, FPS counter), `main_headless.cpp` (blitz_headless.exe).
+- `src/runtime/settings.*`: settings.ini in %APPDATA%/NFL Blitz 2003 (BLITZ_SET="k=v;k=v" overrides).
 
 ## Build / run
 - `powershell -ExecutionPolicy Bypass -File tools/build.ps1 [-SkipRecomp] [-Configure] [-Target blitz]`

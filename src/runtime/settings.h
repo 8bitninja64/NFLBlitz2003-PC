@@ -23,6 +23,8 @@ struct Settings {
   std::string backend = "auto";  // auto | d3d11 | d3d12 | vulkan
   int windowWidth = 0, windowHeight = 0;  // 0: fit to the display
   bool showFps = false;
+  bool texturePacks = true;   // load Dolphin-format packs from <user data>/Textures/GO3E5D
+  bool dumpTextures = false;  // write the game's textures out (for pack makers)
   // Audio
   int volume = 100;  // percent
   bool mute = false;

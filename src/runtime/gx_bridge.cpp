@@ -446,8 +446,20 @@ void Bridge::endFrame() {
   m_invalidates = m_invalidatedBytes = 0;
   if (m_out.size() > 0x04000000) LOG_ERROR("GX: frame stream is %zu bytes", m_out.size());
   static uint32_t frameNo = 0;
-  static const char* dump = getenv("BLITZ_GX_DUMP");  // <frame>: save the translated stream
-  if (dump && frameNo == (uint32_t)atoi(dump)) {
+  // BLITZ_GX_DUMP=<frame>[,<count>[,<step>]]: save translated streams (+ textures of the first).
+  static const char* dump = getenv("BLITZ_GX_DUMP");
+  static uint32_t dumpFirst = 0, dumpCount = 1, dumpStep = 1;
+  if (dump && !dumpFirst && dump[0]) {
+    int a = 0, b = 1, c = 1;
+    sscanf(dump, "%d,%d,%d", &a, &b, &c);
+    dumpFirst = (uint32_t)a;
+    dumpCount = b > 0 ? (uint32_t)b : 1;
+    dumpStep = c > 0 ? (uint32_t)c : 1;
+  }
+  auto dumpThis = [](uint32_t n) {
+    return dump && n >= dumpFirst && (n - dumpFirst) % dumpStep == 0 && (n - dumpFirst) / dumpStep < dumpCount;
+  };
+  if (dumpThis(frameNo)) {
     char name[64];
     snprintf(name, sizeof(name), "build/gxframe_%u.bin", frameNo);
     if (FILE* f = fopen(name, "wb")) {
@@ -471,7 +483,7 @@ void Bridge::endFrame() {
   static double sumWait = 0, sumGuest = 0;
   auto t0 = std::chrono::steady_clock::now();
   sumGuest += std::chrono::duration<double, std::milli>(t0 - lastEnd).count();
-  m_dumpTextures = dump && frameNo == (uint32_t)atoi(dump);
+  m_dumpTextures = dump && frameNo == dumpFirst;
   std::unique_lock lk(mutex);
   // Lockstep: wait for Aurora to finish the previous frame before handing over this one.
   cv.wait(lk, [&] { return consumed || shutdown; });

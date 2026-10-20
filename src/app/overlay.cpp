@@ -96,6 +96,8 @@ void drawSettings() {
         changed = true;
       }
       changed |= ImGui::Checkbox("VSync", &st.vsync);
+      changed |= ImGui::Checkbox("Load texture packs (Textures/GO3E5D)", &st.texturePacks);
+      changed |= ImGui::Checkbox("Dump textures (for pack makers)", &st.dumpTextures);
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Audio")) {

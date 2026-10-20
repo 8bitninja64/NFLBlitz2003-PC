@@ -31,6 +31,7 @@
 #include <dolphin/gx.h>
 #include <dolphin/pad.h>
 #include <dolphin/vi.h>
+#include <aurora/texture.hpp>  // after the dolphin headers (uses GX types)
 
 #include <chrono>
 #include <cstdlib>
@@ -281,11 +282,18 @@ int main(int argc, char** argv) {
   config.maxTextureAnisotropy = (uint16_t)st.anisotropy;
   config.startFullscreen = st.fullscreen;
   config.desiredBackend = backendFromSettings(getenv("BLITZ_BACKEND") ? getenv("BLITZ_BACKEND") : st.backend);
+  config.allowTextureDumps = st.dumpTextures;
   config.mem1Size = 0;  // guest memory is owned by the runtime
   config.mem2Size = 0;
   aurora_initialize(argc, argv, &config);
   if (st.windowWidth <= 0 || st.windowHeight <= 0) fitWindowToDisplay(aurora_get_window(), st.widescreen);
   applyDisplay();
+  if (st.texturePacks) {
+    // Dolphin-format packs (tex1_WxH_hash_fmt.png ...), e.g. from an existing GO3E5D pack.
+    auto packDir = std::filesystem::u8path(userDataDir()) / "Textures" / "GO3E5D";
+    auto group = aurora::texture::load_replacement_directory(packDir);
+    (void)group;
+  }
   overlay::init({setFullscreen, applyDisplay, setVolume, requestQuit});
   if (getenv("BLITZ_TOPMOST")) SDL_SetWindowAlwaysOnTop(aurora_get_window(), true);  // for screenshots
   // Aurora's GX state defaults; the game's own GXInit stream then sets everything it uses.

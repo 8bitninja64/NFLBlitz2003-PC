@@ -32,6 +32,8 @@ static void applySetting(const std::string& key, const std::string& v) {
   else if (key == "backend") s.backend = v;
   else if (key == "resolution_scale") s.resolutionScale = (float)atof(v.c_str());
   else if (key == "show_fps") s.showFps = parseBool(v);
+  else if (key == "texture_packs") s.texturePacks = parseBool(v);
+  else if (key == "dump_textures") s.dumpTextures = parseBool(v);
   else if (key == "window_width") s.windowWidth = atoi(v.c_str());
   else if (key == "window_height") s.windowHeight = atoi(v.c_str());
   else if (key == "volume") s.volume = atoi(v.c_str());
@@ -106,6 +108,8 @@ void save() {
       << "resolution_scale = " << s.resolutionScale << "   # 0 = window size; N = N x 480 lines (3 = 1440p, 4.5 = 2160p)\n"
       << "backend = " << s.backend << "   # auto | d3d11 | d3d12 | vulkan\n"
       << "show_fps = " << (s.showFps ? "on" : "off") << "\n"
+      << "texture_packs = " << (s.texturePacks ? "on" : "off") << "   # Dolphin-format packs in Textures/GO3E5D\n"
+      << "dump_textures = " << (s.dumpTextures ? "on" : "off") << "   # write the game's textures (pack making)\n"
       << "window_width = " << s.windowWidth << "   # 0 = fit to the display\n"
       << "window_height = " << s.windowHeight << "\n"
       << "\n[audio]\n"

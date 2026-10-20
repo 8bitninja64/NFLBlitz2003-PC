@@ -50,6 +50,7 @@ def main():
     i = 0
     counts = Counter()
     draws = 0
+    fog_types = Counter()
     while i < len(d):
         op = d[i]
         if op == 0x61:
@@ -97,6 +98,9 @@ def main():
             n = struct.unpack('>H', d[i + 1:i + 3])[0]
             vs = st.vsize(op & 7)
             draws += 1
+            fsel = (st.bp.get(0xF1, 0) >> 21) & 7  # fog type: 0 = off
+            if fsel:
+                fog_types[fsel] += 1
             if show_all or draws <= 3:
                 xf = st.xf
                 print(f'{i:7d} DRAW {op:02X} n={n} vsize={vs} vcd={st.vcd_lo:08X}/{st.vcd_hi:08X} '
@@ -107,7 +111,11 @@ def main():
         else:
             print('bad opcode', hex(op), 'at', i)
             return
-    print(f'{draws} draws, {len(d)} bytes')
+    fog_draws = sum(fog_types.values())
+    print(f'{draws} draws, {len(d)} bytes; draws with fog: {fog_draws} by type {dict(fog_types)}')
+    if fog_draws:
+        print(f'  last fog regs: EE={st.bp.get(0xEE,0):06X} EF={st.bp.get(0xEF,0):06X} F0={st.bp.get(0xF0,0):06X} '
+              f'F1={st.bp.get(0xF1,0):06X} F2(color)={st.bp.get(0xF2,0):06X}')
     print(sorted(counts.items()))
 
 
