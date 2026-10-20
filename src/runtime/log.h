@@ -11,6 +11,7 @@ bool logEnabled(LogLevel level);
 void dumpCallTrace();                    // this host thread's recent guest functions
 void dumpAllTraces();
 void registerTraceRing(const char* name);  // call on each host thread that runs guest code
+void unregisterTraceRing();              // before such a thread exits
 void startWatchdog();                    // BLITZ_WATCHDOG=<secs>: periodic trace dumps
 void installCrashHandler();              // logs host exceptions with guest traces
 

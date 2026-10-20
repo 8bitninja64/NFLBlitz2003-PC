@@ -5,6 +5,7 @@
 #include "gx_bridge.h"
 #include "hw.h"
 #include "log.h"
+#include "overlay.h"
 #include "pad_input.h"
 #include "sched.h"
 #include "settings.h"
@@ -72,8 +73,12 @@ static uint32_t audioQueued() {
   return bytes > 0 ? (uint32_t)bytes / 4 : 0;
 }
 
+static void setVolume(float gain) {
+  if (g_audioStream) SDL_SetAudioStreamGain(g_audioStream, gain);
+}
+
 static void initAudio() {
-  if (getenv("BLITZ_MUTE") || settings::get().mute) return;
+  if (getenv("BLITZ_MUTE")) return;
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
     LOG_WARN("audio unavailable: %s", SDL_GetError());
     return;
@@ -84,7 +89,7 @@ static void initAudio() {
     LOG_WARN("could not open an audio device: %s", SDL_GetError());
     return;
   }
-  SDL_SetAudioStreamGain(g_audioStream, settings::get().volume / 100.0f);
+  setVolume(settings::get().mute ? 0.0f : settings::get().volume / 100.0f);
   SDL_ResumeAudioStreamDevice(g_audioStream);
   static const audioout::Sink sink{audioSubmit, audioQueued, 32000};
   audioout::setSink(&sink);
@@ -98,6 +103,7 @@ static void pollPads() {
   for (int i = 0; i < padinput::kPorts; i++) {
     pads[i] = {st[i].button, st[i].stickX, st[i].stickY, st[i].substickX, st[i].substickY, st[i].triggerLeft,
                st[i].triggerRight, st[i].analogA, st[i].analogB, st[i].err};
+    if (overlay::isOpen()) pads[i] = {0, 0, 0, 0, 0, 0, 0, 0, 0, st[i].err};  // the menu has the input
     uint32_t cmd;
     if (padinput::takeMotor(i, &cmd)) PADControlMotor((u32)i, cmd);
   }
@@ -159,18 +165,32 @@ static AuroraBackend backendFromSettings(const std::string& name) {
 #endif
 }
 
-// Alt+Enter / F11: toggle fullscreen and remember it.
+static void setFullscreen(bool on) {
+  VISetWindowFullscreen(on);
+  settings::get().fullscreen = on;
+  settings::save();
+}
+
+static void applyDisplay() {
+  const settings::Settings& st = settings::get();
+  AuroraSetViewportPolicy(st.widescreen ? AURORA_VIEWPORT_STRETCH : AURORA_VIEWPORT_FIT);
+  VISetFrameBufferScale(st.resolutionScale);  // 0 = window size, N = N x 480 lines
+}
+
+static bool g_quit = false;
+static void requestQuit() { g_quit = true; }
+
+// Alt+Enter / F11: fullscreen. F1: settings menu (pauses). Esc: close the menu.
 static void handleHotkeys() {
-  static bool wasDown = false;
+  static bool wasDown = false, f1WasDown = false;
   const bool* keys = SDL_GetKeyboardState(nullptr);
+  bool f1 = keys[SDL_SCANCODE_F1];
+  if (f1 && !f1WasDown) overlay::toggle();
+  f1WasDown = f1;
+  if (keys[SDL_SCANCODE_ESCAPE] && overlay::isOpen()) overlay::close();
   bool alt = keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT];
   bool down = keys[SDL_SCANCODE_F11] || (alt && keys[SDL_SCANCODE_RETURN]);
-  if (down && !wasDown) {
-    bool fs = !VIGetWindowFullscreen();
-    VISetWindowFullscreen(fs);
-    settings::get().fullscreen = fs;
-    settings::save();
-  }
+  if (down && !wasDown) setFullscreen(!VIGetWindowFullscreen());
   wasDown = down;
 }
 
@@ -255,8 +275,8 @@ int main(int argc, char** argv) {
   config.mem2Size = 0;
   aurora_initialize(argc, argv, &config);
   if (st.windowWidth <= 0 || st.windowHeight <= 0) fitWindowToDisplay(aurora_get_window(), st.widescreen);
-  AuroraSetViewportPolicy(st.widescreen ? AURORA_VIEWPORT_STRETCH : AURORA_VIEWPORT_FIT);
-  if (st.resolutionScale > 0.0f) VISetFrameBufferScale(st.resolutionScale);  // N x 480 lines
+  applyDisplay();
+  overlay::init({setFullscreen, applyDisplay, setVolume, requestQuit});
   if (getenv("BLITZ_TOPMOST")) SDL_SetWindowAlwaysOnTop(aurora_get_window(), true);  // for screenshots
   // Aurora's GX state defaults; the game's own GXInit stream then sets everything it uses.
   static uint8_t auroraFifo[0x40000];
@@ -289,7 +309,11 @@ int main(int argc, char** argv) {
   std::vector<uint8_t> frame;
   uint64_t frames = 0;
   bool exiting = false;
-  while (!exiting) {
+  bool holding = false;  // a guest frame kept (not consumed) while paused
+  float fps = 0.0f;
+  uint64_t fpsFrames = 0;
+  auto fpsStart = std::chrono::steady_clock::now();
+  while (!exiting && !g_quit) {
     const AuroraEvent* event = aurora_update();
     while (event && event->type != AURORA_NONE) {
       if (event->type == AURORA_EXIT) exiting = true;
@@ -297,21 +321,47 @@ int main(int argc, char** argv) {
     }
     if (exiting) break;
     handleHotkeys();
+    if (const char* at = getenv("BLITZ_MENU_AT")) {  // test hook: open the menu after N seconds
+      static bool opened = false;
+      static const auto start = std::chrono::steady_clock::now();
+      if (!opened && std::chrono::steady_clock::now() - start > std::chrono::seconds(atoi(at))) {
+        opened = true;
+        if (!overlay::isOpen()) overlay::toggle();
+      }
+    }
     updateAspect();
     pollPads();
-    if (!gxbridge::takeFrame(frame, 8)) continue;
+    const bool paused = overlay::isOpen();
+
+    // While paused the last frame is shown again (its data stays valid: the guest waits at
+    // the next handoff), so the menu has something to draw over.
+    bool haveFrame = holding || gxbridge::takeFrame(frame, 8);
+    if (!haveFrame && !paused) continue;
+    if (paused) std::this_thread::sleep_for(std::chrono::milliseconds(12));
+
     using clk = std::chrono::steady_clock;
-    static double tBegin = 0, tProc = 0, tEnd = 0, tTake = 0;
+    static double tBegin = 0, tProc = 0, tEnd = 0;
     auto t0 = clk::now();
     bool began = aurora_begin_frame();
     auto t1 = clk::now();
     if (began) {
       static const bool empty = getenv("BLITZ_EMPTY_FRAMES") != nullptr;  // pacing diagnostics
-      if (!empty) GXCallDisplayList(frame.data(), (u32)frame.size());
+      if (haveFrame && !empty) GXCallDisplayList(frame.data(), (u32)frame.size());
+      overlay::draw(fps);
       // Once the FIFO is processed Aurora holds its own copies of everything it read from
       // guest memory: let the game build its next frame while this one is presented.
       aurora::gx::fifo::drain();
+    }
+    if (haveFrame && !paused) {
       gxbridge::frameConsumed();
+      holding = false;
+      fpsFrames++;
+    } else if (haveFrame) {
+      holding = true;
+    }
+    // Devices stop only once a frame is held: the game needs retraces to finish that frame.
+    hw::g_paused.store(paused && holding);
+    if (began) {
       auto t2 = clk::now();
       aurora_end_frame();
       auto t3 = clk::now();
@@ -323,11 +373,17 @@ int main(int argc, char** argv) {
         LOG_INFO("aurora: begin %.1f ms, process %.1f ms, end %.1f ms per frame", tBegin / 100, tProc / 100, tEnd / 100);
         tBegin = tProc = tEnd = 0;
       }
-    } else {
-      gxbridge::frameConsumed();
+    }
+    auto now = clk::now();
+    double span = std::chrono::duration<double>(now - fpsStart).count();
+    if (span >= 0.5) {
+      fps = (float)(fpsFrames / span);
+      fpsFrames = 0;
+      fpsStart = now;
     }
     if (++frames % 600 == 0) LOG_INFO("presented %llu frames", (unsigned long long)frames);
   }
+  hw::g_paused.store(false);
   gxbridge::shutdown();
   aurora_shutdown();
   return 0;

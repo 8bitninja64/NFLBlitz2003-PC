@@ -45,6 +45,15 @@ void registerTraceRing(const char* name) {
   g_rings.emplace_back(name, &guest::t_trace);
 }
 
+void unregisterTraceRing() {
+  std::lock_guard lk(g_ringMutex);
+  for (auto it = g_rings.begin(); it != g_rings.end(); ++it)
+    if (it->second == &guest::t_trace) {
+      g_rings.erase(it);
+      break;
+    }
+}
+
 static void printRing(const char* name, const guest::TraceRing& r) {
   char line[64 * 10 + 64];
   int n = snprintf(line, sizeof(line), "trace %s (loop %08X; oldest first):", name, r.loop);

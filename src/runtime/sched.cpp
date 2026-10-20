@@ -192,6 +192,7 @@ static void threadMain(Thread* t) {
   } catch (ThreadExit&) {
   }
   t->ctx = nullptr;
+  unregisterTraceRing();
   LOG_INFO("guest thread %08X ended", t->addr);
 }
 

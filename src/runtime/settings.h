@@ -22,6 +22,7 @@ struct Settings {
   float resolutionScale = 0.0f;  // 0: render at the window size; N: N x 480 lines (3 = 1440p)
   std::string backend = "auto";  // auto | d3d11 | d3d12 | vulkan
   int windowWidth = 0, windowHeight = 0;  // 0: fit to the display
+  bool showFps = false;
   // Audio
   int volume = 100;  // percent
   bool mute = false;

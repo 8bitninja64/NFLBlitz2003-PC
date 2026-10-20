@@ -23,6 +23,8 @@
 
 namespace hw {
 
+std::atomic<bool> g_paused{false};
+
 // --- EXI -----------------------------------------------------------------------
 static uint32_t g_exi[3][5];  // per channel: CSR, MAR, LENGTH, CR, DATA
 
@@ -145,6 +147,7 @@ static void viRetraceThread() {
   for (;;) {
     std::this_thread::sleep_until(next);
     next += period;
+    if (g_paused.load()) continue;  // the guest is held at a frame handoff (menu open)
     static uint32_t retrace = 0;
     sched::postIrq([context](guest::Ctx& c) {
       maybeDumpXfb(retrace++);
@@ -249,7 +252,7 @@ static void aiDmaThread() {
   std::vector<int16_t> host;
   auto next = steady_clock::now();
   for (;;) {
-    if (!(g_dsp[0x36 / 2] & 0x8000)) {
+    if (!(g_dsp[0x36 / 2] & 0x8000) || g_paused.load()) {
       std::this_thread::sleep_for(milliseconds(1));
       next = steady_clock::now();
       continue;
