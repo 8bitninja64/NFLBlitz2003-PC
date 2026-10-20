@@ -12,3 +12,4 @@
 0x80003100 TRK_memset
 0x8000518C memset
 0x801A7EA8 __OSInitAudioSystem
+0x80194204 CARDGetSectorSize   # reads CARDControl.sectorSize (+0xC)

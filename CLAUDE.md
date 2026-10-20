@@ -34,6 +34,9 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
     hw.cpp answers 0xBABE<size>+address mails with it and reports 0xDCD10001 (task resumed).
     The AI DMA engine (hw.cpp) plays each output buffer in real time, raising the AI interrupt that
     drives MusyX's 5 ms tick; samples go to audio_out (SDL3 stream in the window app).
+  - hle_card.cpp: CARD API on Aurora's CARD library (GCI folder %APPDATA%/NFL Blitz 2003/USA/Card A, slot
+    A only; created at first use so a formatted card is inserted). Async ops finish immediately and
+    run the game's callback as an interrupt. -v logs every CARD call's result.
   - hle_dvd.cpp: DVDReadAsyncPrio etc. from the disc on a worker thread (DVDOpen stays recompiled).
   - hle_pad.cpp + pad_input.cpp: PADRead etc. from a snapshot the window app fills from Aurora PAD
     (SDL gamepads, GC adapter, keyboard) each loop; rumble goes back the same way. SI is not emulated.
@@ -95,5 +98,7 @@ RenderWare 801D13C8..80227364.
 - Audio: AX command lists processed on the host; intro movies, menus and gameplay produce sound
   (verified by recording, not yet by ear). Not modelled: polyphase SRC filter (cubic instead), ITD/HRTF,
   low-pass filter, compressor; the title screen is silent (check whether that's correct).
-- Not yet: memory card (CARD → Aurora), some effects (a white bloom washed the screen during one play: likely an
+- Memory card: detection, mount/check, directory and open work (empty card → "no player records");
+  create/write paths are wired but not yet exercised by a real save.
+- Not yet:  (CARD → Aurora), some effects (a white bloom washed the screen during one play: likely an
   EFB copy / post effect), RVZ discs, first-run setup / packaging, options UI.

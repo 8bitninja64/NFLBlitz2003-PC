@@ -23,6 +23,7 @@ set(BLITZ_RUNTIME_SOURCES
   src/runtime/disc.cpp
   src/runtime/dsp_ax.cpp
   src/runtime/gx_fifo.cpp
+  src/runtime/hle_card.cpp
   src/runtime/hle_dvd.cpp
   src/runtime/hle_os.cpp
   src/runtime/hle_pad.cpp
@@ -47,7 +48,7 @@ endif()
 
 add_library(blitz_runtime STATIC ${BLITZ_RUNTIME_SOURCES})
 target_include_directories(blitz_runtime PUBLIC src/runtime)
-target_link_libraries(blitz_runtime PUBLIC blitz_game)
+target_link_libraries(blitz_runtime PUBLIC blitz_game aurora::card)
 if (WIN32)
   target_link_libraries(blitz_runtime PUBLIC winmm)
 endif()

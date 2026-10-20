@@ -32,3 +32,26 @@ PADSetSpec
 PADControlMotor
 PADControlAllMotors
 PADSetSamplingCallback
+# Memory card (src/runtime/hle_card.cpp)
+CARDInit
+CARDGetResultCode
+CARDProbeEx
+CARDMount
+CARDUnmount
+CARDCheck
+CARDCheckAsync
+CARDFormatAsync
+CARDFreeBlocks
+CARDGetSerialNo
+CARDOpen
+CARDClose
+CARDCreateAsync
+CARDReadAsync
+CARDWrite
+CARDWriteAsync
+CARDFastDeleteAsync
+CARDGetStatus
+CARDSetStatus
+CARDSetStatusAsync
+CARDRenameAsync
+CARDGetSectorSize
