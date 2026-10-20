@@ -1,0 +1,25 @@
+# Functions replaced by host (HLE) implementations: <symbol or 0xADDR> [= HLE name]
+__OSInitAudioSystem
+# OS threads / scheduler (src/runtime/hle_thread.cpp)
+OSCreateThread
+OSResumeThread
+OSSuspendThread
+OSSleepThread
+OSWakeupThread
+OSExitThread
+OSCancelThread
+__OSReschedule
+OSDisableScheduler
+OSEnableScheduler
+SelectThread
+OSSetAlarm
+OSSetPeriodicAlarm
+OSCancelAlarm
+# DVD (src/runtime/hle_dvd.cpp)
+DVDReadAsyncPrio
+DVDReadAbsAsyncPrio
+DVDGetCommandBlockStatus
+DVDGetDriveStatus
+DVDCancelAsync
+DVDCancel
+DVDCheckDisk

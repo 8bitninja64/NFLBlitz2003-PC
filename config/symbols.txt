@@ -1,0 +1,14 @@
+# Manually identified functions: <address> <name>
+# (SDK names from signature matching live in sdk_symbols.txt and are merged by the build.)
+0x80005304 __start
+0x80005418 __init_registers
+0x800054F4 __init_hardware
+0x80005434 __init_data
+0x801A6CA8 OSInit
+0x801ACBCC __init_user
+0x8001B2F0 main
+0x8018321C exit
+0x80005274 memcpy
+0x80003100 TRK_memset
+0x8000518C memset
+0x801A7EA8 __OSInitAudioSystem

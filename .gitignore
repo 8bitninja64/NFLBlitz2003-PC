@@ -1,0 +1,5 @@
+orig/
+build/
+*.iso
+*.rvz
+__pycache__/

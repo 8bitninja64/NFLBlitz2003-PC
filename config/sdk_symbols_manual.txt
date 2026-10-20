@@ -1,0 +1,8 @@
+# Manually verified overrides: addr name [confidence]   (consumed by tools/sdkid/resolve.py --manual)
+# .init section (text0) layout, verified by call graph / __start / __init_data references
+0x80003100 TRK_memset high          # calls TRK_fill_mem
+0x80003130 TRK_memcpy high
+0x80003154 gTRKInterruptVectorTable high   # label: TRK exception vector stubs up to 0x80005088 (not real functions)
+0x80005088 __TRK_reset high         # references gTRKInterruptVectorTable, TRK_memcpy, TRK_flush_cache
+0x80005548 _rom_copy_info high      # DATA table in .init (referenced by __init_data), not code
+0x800055CC _bss_init_info high      # DATA table in .init (referenced by __init_data), not code
