@@ -40,15 +40,21 @@ thread_local TraceRing t_trace;
 static std::mutex g_ringMutex;
 static std::vector<std::pair<const char*, guest::TraceRing*>> g_rings;
 
+// Generated code records into its own module's thread-local ring; the loader tells us how
+// to reach it from each host thread.
+static guest::TraceRing* (*g_ringSource)() = nullptr;
+void setTraceRingSource(guest::TraceRing* (*source)()) { g_ringSource = source; }
+static guest::TraceRing* threadRing() { return g_ringSource ? g_ringSource() : &guest::t_trace; }
+
 void registerTraceRing(const char* name) {
   std::lock_guard lk(g_ringMutex);
-  g_rings.emplace_back(name, &guest::t_trace);
+  g_rings.emplace_back(name, threadRing());
 }
 
 void unregisterTraceRing() {
   std::lock_guard lk(g_ringMutex);
   for (auto it = g_rings.begin(); it != g_rings.end(); ++it)
-    if (it->second == &guest::t_trace) {
+    if (it->second == threadRing()) {
       g_rings.erase(it);
       break;
     }
@@ -63,7 +69,7 @@ static void printRing(const char* name, const guest::TraceRing& r) {
   logf(LogLevel::Error, "%s", line);
 }
 
-void dumpCallTrace() { printRing("current", guest::t_trace); }
+void dumpCallTrace() { printRing("current", *threadRing()); }
 
 void dumpAllTraces() {
   std::lock_guard lk(g_ringMutex);

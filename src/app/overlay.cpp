@@ -2,10 +2,14 @@
 
 #include "settings.h"
 
+#include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_scancode.h>
+#include <dolphin/pad.h>
 #include <imgui.h>
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace overlay {
 
@@ -29,14 +33,121 @@ int resolutionIndex(float scale) {
   return 0;
 }
 
-void drawFps(float fps) {
+void drawFps(float fps, unsigned long long frame) {
   ImGui::SetNextWindowPos(ImVec2(8, 8), ImGuiCond_Always);
   ImGui::SetNextWindowBgAlpha(0.45f);
   ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
                            ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs;
-  if (ImGui::Begin("##fps", nullptr, flags)) ImGui::Text("%.0f fps", fps);
+  static const bool frameNo = getenv("BLITZ_FRAMENO") != nullptr;  // debugging: match screenshots to dumps
+  if (ImGui::Begin("##fps", nullptr, flags)) {
+    if (frameNo) ImGui::Text("%.0f fps  frame %llu", fps, frame);
+    else ImGui::Text("%.0f fps", fps);
+  }
   ImGui::End();
+}
+
+// --- controls ---------------------------------------------------------------------
+const char* buttonLabel(PADButton b) {
+  switch (b) {
+  case PAD_BUTTON_LEFT: return "D-pad left";
+  case PAD_BUTTON_RIGHT: return "D-pad right";
+  case PAD_BUTTON_DOWN: return "D-pad down";
+  case PAD_BUTTON_UP: return "D-pad up";
+  case PAD_TRIGGER_Z: return "Z";
+  case PAD_TRIGGER_R: return "R (digital)";
+  case PAD_TRIGGER_L: return "L (digital)";
+  case PAD_BUTTON_A: return "A";
+  case PAD_BUTTON_B: return "B";
+  case PAD_BUTTON_X: return "X";
+  case PAD_BUTTON_Y: return "Y";
+  case PAD_BUTTON_START: return "Start";
+  default: return "?";
+  }
+}
+
+const char* axisLabel(PADAxis a) {
+  static const char* names[PAD_AXIS_COUNT] = {"Stick right", "Stick left", "Stick up", "Stick down",
+                                              "C-stick right", "C-stick left", "C-stick up", "C-stick down",
+                                              "L (analog)", "R (analog)"};
+  return a < PAD_AXIS_COUNT ? names[a] : "?";
+}
+
+// Key capture: which binding waits for a key (-1 none; buttons 0..11, axes 100..109).
+int g_capture = -1;
+bool g_captureArmed = false;  // all keys released since the capture started
+
+void pollCapture() {
+  if (g_capture < 0) return;
+  int count = 0;
+  const bool* keys = SDL_GetKeyboardState(&count);
+  bool any = false;
+  int pressed = -1;
+  for (int sc = 1; sc < count; sc++) {
+    if (!keys[sc]) continue;
+    any = true;
+    if (pressed < 0) pressed = sc;
+  }
+  if (!g_captureArmed) {
+    g_captureArmed = !any;  // wait until the click/Enter that started it is released
+    return;
+  }
+  if (pressed < 0) return;
+  if (pressed != SDL_SCANCODE_ESCAPE) {
+    u32 n = 0;
+    if (g_capture < 100) {
+      PADKeyButtonBinding* bindings = PADGetKeyButtonBindings(0, &n);
+      if (bindings && (u32)g_capture < n) PADSetKeyButtonBinding(0, {pressed, bindings[g_capture].padButton});
+    } else {
+      PADKeyAxisBinding* axes = PADGetKeyAxisBindings(0, &n);
+      if (axes && (u32)(g_capture - 100) < n) {
+        PADKeyAxisBinding b = axes[g_capture - 100];
+        b.scancode = pressed;
+        PADSetKeyAxisBinding(0, b);
+      }
+    }
+    PADSerializeMappings();
+  }
+  g_capture = -1;
+}
+
+void bindingRow(int id, const char* label, s32 scancode) {
+  ImGui::TableNextRow();
+  ImGui::TableSetColumnIndex(0);
+  ImGui::TextUnformatted(label);
+  ImGui::TableSetColumnIndex(1);
+  if (g_capture == id) ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "press a key (Esc cancels)");
+  else ImGui::TextUnformatted(scancode > 0 ? SDL_GetScancodeName((SDL_Scancode)scancode) : "-");
+  ImGui::TableSetColumnIndex(2);
+  ImGui::PushID(id);
+  if (ImGui::SmallButton("Change")) {
+    g_capture = id;
+    g_captureArmed = false;
+  }
+  ImGui::PopID();
+}
+
+void drawControls() {
+  pollCapture();
+  u32 pads = PADCount();
+  if (pads == 0) ImGui::TextDisabled("No gamepad connected (GameCube adapters and SDL gamepads are supported).");
+  for (u32 i = 0; i < pads; i++) ImGui::Text("Gamepad %u: %s", i + 1, PADGetNameForControllerIndex(i));
+  ImGui::Separator();
+  ImGui::TextUnformatted("Keyboard (player 1):");
+  u32 nb = 0, na = 0;
+  PADKeyButtonBinding* buttons = PADGetKeyButtonBindings(0, &nb);
+  PADKeyAxisBinding* axes = PADGetKeyAxisBindings(0, &na);
+  float h = ImGui::GetTextLineHeightWithSpacing() * 12;
+  if (ImGui::BeginTable("keys", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImVec2(0, h))) {
+    for (u32 i = 0; axes && i < na; i++) bindingRow(100 + (int)i, axisLabel(axes[i].padAxis), axes[i].scancode);
+    for (u32 i = 0; buttons && i < nb; i++) bindingRow((int)i, buttonLabel(buttons[i].padButton), buttons[i].scancode);
+    ImGui::EndTable();
+  }
+  if (ImGui::Button("Reset keyboard to defaults")) {
+    PADRestoreDefaultKeyBindings(0);
+    PADSerializeMappings();
+  }
+  ImGui::TextDisabled("F1: this menu   Alt+Enter / F11: fullscreen");
 }
 
 void drawSettings() {
@@ -112,23 +223,7 @@ void drawSettings() {
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("Controls")) {
-      ImGui::TextWrapped("Gamepads and GameCube controller adapters work automatically. Keyboard (player 1):");
-      ImGui::Spacing();
-      if (ImGui::BeginTable("keys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
-        const char* rows[][2] = {{"Control stick", "W A S D"}, {"D-pad", "Arrow keys"}, {"A", "K"}, {"B", "J"},
-                                 {"X", "L"},  {"Y", "I"}, {"Z", "Space"}, {"L / R", "Q / E"},
-                                 {"Start", "Enter"}, {"C-stick", "Numpad 8 4 2 6"}};
-        for (auto& r : rows) {
-          ImGui::TableNextRow();
-          ImGui::TableSetColumnIndex(0);
-          ImGui::TextUnformatted(r[0]);
-          ImGui::TableSetColumnIndex(1);
-          ImGui::TextUnformatted(r[1]);
-        }
-        ImGui::EndTable();
-      }
-      ImGui::Spacing();
-      ImGui::TextDisabled("F1: this menu   Alt+Enter / F11: fullscreen");
+      drawControls();
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem("About")) {
@@ -154,15 +249,19 @@ void drawSettings() {
 
 void init(const Actions& actions) { g_actions = actions; }
 bool isOpen() { return g_open; }
+bool isCapturingKey() { return g_open && g_capture >= 0; }
 void toggle() { g_open = !g_open; }
-void close() { g_open = false; }
+void close() {
+  g_open = false;
+  g_capture = -1;
+}
 
-void draw(float presentedFps) {
+void draw(float presentedFps, unsigned long long frame) {
   // Scale the UI with the window (the default font is tiny on large or high-DPI windows).
   ImGuiIO& io = ImGui::GetIO();
   float scale = io.DisplaySize.y / 540.0f;
   io.FontGlobalScale = scale < 1.0f ? 1.0f : scale > 4.0f ? 4.0f : scale;
-  if (settings::get().showFps) drawFps(presentedFps);
+  if (settings::get().showFps || getenv("BLITZ_FRAMENO")) drawFps(presentedFps, frame);
   if (g_open) drawSettings();
 }
 

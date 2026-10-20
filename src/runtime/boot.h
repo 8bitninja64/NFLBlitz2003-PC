@@ -18,6 +18,7 @@ struct BootOptions {
   std::string rememberedDisc;                       // from settings
   std::string (*pickDisc)() = nullptr;              // asks the user; "" = cancelled
   void (*showError)(const std::string&) = nullptr;  // user-facing error
+  std::string modulePath;                           // game module; default: next to the executable
   std::string chosenDisc;                           // out: the disc that was opened
 };
 bool bootFromArgs(int argc, char** argv, BootOptions* opts = nullptr);  // disc, memory, devices, DOL

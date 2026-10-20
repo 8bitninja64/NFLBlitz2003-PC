@@ -11,6 +11,7 @@ namespace guest {
 uint8_t* g_mem = nullptr;
 uint8_t* g_lockedCache = nullptr;
 volatile uint32_t g_irqPending = 0;
+volatile uint32_t* g_irqPendingPtr = &g_irqPending;
 
 static MmioHandler g_handlers[64];  // indexed by (ea >> 10) & 63 within 0xCC00xxxx
 static uint32_t g_regShadow[0x10000 / 4];

@@ -12,11 +12,12 @@ struct Actions {
 
 void init(const Actions& actions);
 bool isOpen();
+bool isCapturingKey();  // the Controls tab waits for a key (Esc must not close the menu)
 void toggle();
 void close();
 
 // Draw for this frame (call between aurora_begin_frame and aurora_end_frame).
-// presentedFps: frames presented per second, for the counter.
-void draw(float presentedFps);
+// presentedFps: frames presented per second; frame: guest frames consumed (for BLITZ_FRAMENO).
+void draw(float presentedFps, unsigned long long frame);
 
 }  // namespace overlay

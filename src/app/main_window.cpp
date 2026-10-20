@@ -197,7 +197,7 @@ static void handleHotkeys() {
   bool f1 = keys[SDL_SCANCODE_F1];
   if (f1 && !f1WasDown) overlay::toggle();
   f1WasDown = f1;
-  if (keys[SDL_SCANCODE_ESCAPE] && overlay::isOpen()) overlay::close();
+  if (keys[SDL_SCANCODE_ESCAPE] && overlay::isOpen() && !overlay::isCapturingKey()) overlay::close();
   bool alt = keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT];
   bool down = keys[SDL_SCANCODE_F11] || (alt && keys[SDL_SCANCODE_RETURN]);
   if (down && !wasDown) setFullscreen(!VIGetWindowFullscreen());
@@ -328,6 +328,7 @@ int main(int argc, char** argv) {
   uint64_t frames = 0;
   bool exiting = false;
   bool holding = false;  // a guest frame kept (not consumed) while paused
+  unsigned long long consumedFrames = 0;
   float fps = 0.0f;
   uint64_t fpsFrames = 0;
   auto fpsStart = std::chrono::steady_clock::now();
@@ -367,7 +368,7 @@ int main(int argc, char** argv) {
       static const bool memWatch = getenv("BLITZ_MEMWATCH") != nullptr;  // leak hunting
       size_t before = memWatch ? processMemory() : 0;
       if (haveFrame && !empty) GXCallDisplayList(frame.data(), (u32)frame.size());
-      overlay::draw(fps);
+      overlay::draw(fps, consumedFrames);
       // Once the FIFO is processed Aurora holds its own copies of everything it read from
       // guest memory: let the game build its next frame while this one is presented.
       aurora::gx::fifo::drain();
@@ -387,6 +388,7 @@ int main(int argc, char** argv) {
       gxbridge::frameConsumed();
       holding = false;
       fpsFrames++;
+      consumedFrames++;
     } else if (haveFrame) {
       holding = true;
     }

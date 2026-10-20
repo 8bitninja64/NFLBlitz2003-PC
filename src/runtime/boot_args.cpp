@@ -6,6 +6,7 @@
 #include "hw.h"
 #include "log.h"
 #include "memory.h"
+#include "module_loader.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -16,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace guest {
 
@@ -83,10 +85,34 @@ bool bootFromArgs(int argc, char** argv, BootOptions* opts) {
   initMemory();
   hw::init();
   gxfifo::init();
-  if (!loadDol() || !setupLowMemory()) {
-    LOG_ERROR("failed to load the executable from the disc");
+
+  // The game code: a module recompiled from this disc's executable.
+  auto fail = [&](const std::string& msg) {
+    LOG_ERROR("%s", msg.c_str());
+    if (opts && opts->showError) opts->showError(msg);
     return false;
+  };
+  std::string modulePath = opts && !opts->modulePath.empty() ? opts->modulePath : defaultModulePath();
+  std::string error;
+  if (!loadGameModule(modulePath, &error)) return fail(error);
+  {
+    uint8_t hdr[0x100];
+    if (!g_disc.read(g_disc.dolOffset(), hdr, sizeof(hdr))) return fail("cannot read the executable from the disc");
+    uint32_t dolSize = 0;
+    for (int i = 0; i < 18; i++) {
+      auto be = [&](int o) { return (uint32_t)hdr[o] << 24 | hdr[o + 1] << 16 | hdr[o + 2] << 8 | hdr[o + 3]; };
+      uint32_t end = be(i * 4) + be(0x90 + i * 4);
+      if (be(0x90 + i * 4) && end > dolSize) dolSize = end;
+    }
+    std::vector<uint8_t> dol(dolSize);
+    if (!g_disc.read(g_disc.dolOffset(), dol.data(), dolSize)) return fail("cannot read the executable from the disc");
+    std::string hash = dolHash(dol.data(), dol.size());
+    if (hash != moduleDolHash())
+      return fail("The game module was built from a different executable (" + std::string(moduleDolHash()) +
+                  ", this disc has " + hash + "). Rebuild it from this disc.");
   }
+
+  if (!loadDol() || !setupLowMemory()) return fail("failed to load the executable from the disc");
   LOG_INFO("entry %08X, %u recompiled functions", g_boot.entry, g_funcTableSize);
   return true;
 }

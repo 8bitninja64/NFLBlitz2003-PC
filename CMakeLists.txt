@@ -8,8 +8,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(BLITZ_GEN_DIR "${CMAKE_SOURCE_DIR}/build/recomp_gen" CACHE PATH "Recompiler output directory")
 file(GLOB BLITZ_GEN_SOURCES CONFIGURE_DEPENDS "${BLITZ_GEN_DIR}/*.cpp")
 
-add_library(blitz_game STATIC ${BLITZ_GEN_SOURCES})
-target_include_directories(blitz_game PUBLIC src/runtime "${BLITZ_GEN_DIR}")
+# The game module: code recompiled from the user's disc, loaded by the executable at run time.
+add_library(blitz_game SHARED ${BLITZ_GEN_SOURCES} src/runtime/module_rt.cpp)
+target_include_directories(blitz_game PRIVATE src/runtime "${BLITZ_GEN_DIR}")
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   target_compile_options(blitz_game PRIVATE -Wno-unused-label -Wno-unused-variable -Wno-unreachable-code
     -Wno-parentheses-equality -Wno-tautological-compare)
@@ -24,6 +25,7 @@ set(BLITZ_RUNTIME_SOURCES
   src/runtime/dsp_ax.cpp
   src/runtime/gx_fifo.cpp
   src/runtime/hle_card.cpp
+  src/runtime/hle_registry.cpp
   src/runtime/hle_dvd.cpp
   src/runtime/hle_os.cpp
   src/runtime/hle_pad.cpp
@@ -31,6 +33,7 @@ set(BLITZ_RUNTIME_SOURCES
   src/runtime/hw.cpp
   src/runtime/log.cpp
   src/runtime/memory.cpp
+  src/runtime/module_loader.cpp
   src/runtime/pad_input.cpp
   src/runtime/sched.cpp
   src/runtime/settings.cpp
@@ -47,22 +50,25 @@ if (BLITZ_AURORA_CHECKS)
   target_compile_options(aurora_core PRIVATE -UNDEBUG)
 endif()
 
-add_library(blitz_runtime STATIC ${BLITZ_RUNTIME_SOURCES})
+# An object library so every HLE implementation (self-registering by name) is linked in.
+add_library(blitz_runtime OBJECT ${BLITZ_RUNTIME_SOURCES})
 target_include_directories(blitz_runtime PUBLIC src/runtime)
-target_link_libraries(blitz_runtime PUBLIC blitz_game aurora::card aurora::dvd)
+target_link_libraries(blitz_runtime PUBLIC aurora::card aurora::dvd)
 if (WIN32)
   target_link_libraries(blitz_runtime PUBLIC winmm)
 endif()
 
 # Headless runner: no graphics/audio, for bring-up of CPU/OS/HLE.
 add_executable(blitz_headless src/app/main_headless.cpp)
+add_dependencies(blitz_headless blitz_game)
 target_link_libraries(blitz_headless PRIVATE blitz_runtime aurora::gx aurora::vi)
 
 # The game: Aurora window, GX via gx_bridge.
-add_library(blitz_gx STATIC src/runtime/gx_bridge.cpp)
+add_library(blitz_gx OBJECT src/runtime/gx_bridge.cpp)
 target_link_libraries(blitz_gx PUBLIC blitz_runtime aurora::core aurora::gx aurora::vi aurora::pad)
 add_executable(blitz src/app/main_window.cpp src/app/overlay.cpp)
-target_link_libraries(blitz PRIVATE blitz_gx aurora::main)
+add_dependencies(blitz blitz_game)
+target_link_libraries(blitz PRIVATE blitz_gx blitz_runtime aurora::main)
 target_include_directories(blitz PRIVATE extern/aurora/lib)
 if (WIN32)
   target_link_libraries(blitz PRIVATE comdlg32 psapi)

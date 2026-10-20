@@ -31,7 +31,8 @@ constexpr uint32_t kLockedCacheSize = 0x4000;
 
 extern uint8_t* g_mem;          // 32 MB host allocation backing MEM1
 extern uint8_t* g_lockedCache;  // 16 KB L2 locked cache (0xE0000000)
-extern volatile uint32_t g_irqPending;
+extern volatile uint32_t g_irqPending;     // runtime storage
+extern volatile uint32_t* g_irqPendingPtr;  // what generated code polls (a game module gets the runtime's)
 
 union FPR {
   double d;
@@ -222,5 +223,5 @@ extern thread_local TraceRing t_trace;
 #define CHECK_IRQ(c, pc) \
   do { \
     TRACE_LOOP(pc); \
-    if (BL_UNLIKELY(::guest::g_irqPending)) ::guest::checkIrq(c); \
+    if (BL_UNLIKELY(*::guest::g_irqPendingPtr)) ::guest::checkIrq(c); \
   } while (0)

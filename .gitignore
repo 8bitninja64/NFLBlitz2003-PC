@@ -3,3 +3,4 @@ build/
 *.iso
 *.rvz
 __pycache__/
+USA/
