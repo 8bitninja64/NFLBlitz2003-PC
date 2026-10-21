@@ -4,8 +4,10 @@
 #include "func_table.h"
 #include "log.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <mutex>
 
 namespace guest {
 
@@ -39,13 +41,42 @@ void callIndirect(Ctx& c, uint32_t target) {
 
 void trap(Ctx& c, uint32_t pc, const char* what) { fatalTrap(c, pc, what); }
 
-uint64_t timeBase() {
-  // Timer runs at bus clock / 4 = 40.5 MHz.
+// Timer runs at bus clock / 4 = 40.5 MHz. It can run faster than real time (fast boot): from
+// (g_warpNs, g_warpTb) on it advances g_warp ticks per real tick.
+namespace {
+std::atomic<int64_t> g_warpNs{0};
+std::atomic<uint64_t> g_warpTb{0};
+std::atomic<uint32_t> g_warp{1};
+std::atomic<uint64_t> g_lastTb{0};
+std::mutex g_warpMutex;
+
+int64_t hostNs() {
   using namespace std::chrono;
   static const auto start = steady_clock::now();
-  auto ns = duration_cast<nanoseconds>(steady_clock::now() - start).count();
-  return (uint64_t)ns * 81ull / 2000ull;
+  return duration_cast<nanoseconds>(steady_clock::now() - start).count();
 }
+}  // namespace
+
+uint64_t timeBase() {
+  int64_t ns = hostNs();
+  uint64_t tb = g_warpTb.load() + (uint64_t)(ns - g_warpNs.load()) * 81ull / 2000ull * g_warp.load();
+  // Monotonic across warp changes.
+  uint64_t last = g_lastTb.load();
+  while (tb > last && !g_lastTb.compare_exchange_weak(last, tb)) {
+  }
+  return tb > last ? tb : last;
+}
+
+void setTimeWarp(uint32_t factor) {
+  std::lock_guard lk(g_warpMutex);
+  uint64_t tb = timeBase();
+  g_warp = 1;
+  g_warpNs = hostNs();
+  g_warpTb = tb;
+  g_warp = factor ? factor : 1;
+}
+
+uint32_t timeWarp() { return g_warp.load(); }
 
 uint32_t readSpr(Ctx& c, uint32_t spr, uint32_t pc) {
   switch (spr) {

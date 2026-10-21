@@ -139,6 +139,14 @@ static void maybeDumpXfb(uint32_t retrace) {
   LOG_INFO("dumped XFB %08X at retrace %u to %s", addr, retrace, name);
 }
 
+std::atomic<uint32_t> g_framesBuilt{0};
+static uint32_t g_fastBootUntil = 0;
+
+void startFastBoot(uint32_t untilFrame, uint32_t factor) {
+  g_fastBootUntil = untilFrame;
+  guest::setTimeWarp(factor);
+}
+
 static void viRetraceThread() {
   using namespace std::chrono;
   const auto period = nanoseconds(1001000000ll / 60);  // 59.94 Hz
@@ -146,11 +154,35 @@ static void viRetraceThread() {
   uint32_t context = guest::allocReserved(0x2C8);
   for (;;) {
     std::this_thread::sleep_until(next);
-    next += period;
-    if (g_paused.load()) continue;  // the guest is held at a frame handoff (menu open)
     static uint32_t retrace = 0;
+    // Fast boot: the timed boot screens (legal, licenses, memory card) run at g_turboFactor x
+    // speed until the retrace count reaches g_turboUntil.
+    uint32_t turbo = guest::timeWarp();
+    if (turbo > 1 && g_framesBuilt.load() >= g_fastBootUntil) {
+      guest::setTimeWarp(1);
+      turbo = 1;
+      LOG_INFO("fast boot done");
+    }
+    next += period / turbo;
+    if (turbo > 1 && steady_clock::now() > next + milliseconds(50)) next = steady_clock::now();
+    if (g_paused.load()) continue;  // the guest is held at a frame handoff (menu open)
     sched::postIrq([context](guest::Ctx& c) {
       maybeDumpXfb(retrace++);
+      // BLITZ_WATCH=addr[+words],...: log guest words when they change (checked once per retrace).
+      static const char* watch = getenv("BLITZ_WATCH");
+      if (watch) {
+        static uint32_t last[256];
+        int k = 0;
+        for (const char* q = watch; q && *q; q = strchr(q, ',') ? strchr(q, ',') + 1 : nullptr) {
+          char* end = nullptr;
+          uint32_t a = (uint32_t)strtoul(q, &end, 16), n = *end == '+' ? (uint32_t)strtoul(end + 1, nullptr, 10) : 1;
+          for (uint32_t w = 0; w < n && k < 256; w++, k++) {
+            uint32_t v = guest::rd32(a + 4 * w);
+            if (v != last[k]) LOG_INFO("watch %08X: %08X -> %08X at retrace %u", a + 4 * w, last[k], v, retrace);
+            last[k] = v;
+          }
+        }
+      }
       padinput::tick();
       uint32_t handler = sched::callGuest(c, kGetInterruptHandler, {kInterruptVI});
       if (!handler) return;

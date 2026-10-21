@@ -2,7 +2,11 @@
 // Midway and Point of View logos and the football intro (intro.pss) when skip_logos is on.
 #include "hle.h"
 #include "log.h"
+#include "hw.h"
 #include "settings.h"
+
+#include <cstdio>
+#include <cstdlib>
 
 #include <cctype>
 #include <string>
@@ -22,3 +26,14 @@ HLE(MoviePlay) {
     c.r[0] = 1;  // handled: the player does not run
   }
 }
+
+// 8002CE68: the front end's main loop starts as the boot screens begin (legal, licenses, memory
+// card; each timed by the game clock). With skip_logos they run 8x fast until just before the
+// title screen: guest time, retraces and alarms all speed up, so the memory card is still checked.
+HLE(FrontEndLoop) {
+  if (!settings::get().skipLogos) return;
+  unsigned untilFrame = 1100, factor = 8;  // the title screen appears at frame 1120
+  if (const char* fb = getenv("BLITZ_FASTBOOT")) sscanf(fb, "%u,%u", &untilFrame, &factor);  // tuning
+  if (factor > 1) hw::startFastBoot(untilFrame, factor);
+}
+

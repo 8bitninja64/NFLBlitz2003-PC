@@ -13,6 +13,10 @@ extern uint8_t* g_aram;
 
 // Suspends the VI retrace and AI DMA interrupts while the app holds the guest (pause menu).
 extern std::atomic<bool> g_paused;
+// Fast boot: guest time (time base, retraces, alarms) runs factor x until the game has built
+// untilFrame frames (g_framesBuilt, counted by the GX bridge at each display copy).
+void startFastBoot(uint32_t untilFrame, uint32_t factor);
+extern std::atomic<uint32_t> g_framesBuilt;
 
 void init();   // register MMIO devices (before boot)
 void start();  // start device timers (VI retrace)

@@ -16,7 +16,8 @@ No game data is included in this repository.
 - MSAA and anisotropic filtering
 - Gamepads, GameCube controller adapters and keyboard; rumble
 - Memory card saves (Dolphin-compatible GCI folder)
-- Skips the logo movies and the football intro at boot (setting)
+- Starts at the title screen in about 6 seconds: skips the logo movies and the football intro and
+  fast-forwards the legal and memory card screens (setting)
 - **F1** settings menu (pauses the game), FPS counter, Alt+Enter / F11 fullscreen
 - Dolphin-format HD texture packs (`%APPDATA%\NFL Blitz 2003\Textures\GO3E5D`) and texture dumping
 - Reads ISO and compressed dumps (RVZ, WIA, CISO, GCZ)

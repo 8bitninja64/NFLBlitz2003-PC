@@ -57,3 +57,5 @@ CARDRenameAsync
 CARDGetSectorSize
 # Movie player (src/runtime/hle_movie.cpp): pre-hook, skips the logo movies (skip_logos)
 ?0x8010A41C = MoviePlay
+# Front end main loop (hle_movie.cpp): pre-hook, fast-forwards the timed boot screens (skip_logos)
+?0x8002CE68 = FrontEndLoop

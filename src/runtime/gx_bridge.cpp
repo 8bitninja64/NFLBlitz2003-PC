@@ -1,6 +1,7 @@
 #include "gx_bridge.h"
 
 #include "gx_fifo.h"
+#include "hw.h"
 #include "log.h"
 #include "memory.h"
 #include "settings.h"
@@ -897,6 +898,7 @@ void Bridge::endFrame() {
     m_blendHist.clear();
   }
   frameNo++;
+  hw::g_framesBuilt.store(frameNo);
   static auto lastEnd = std::chrono::steady_clock::now();
   static double sumWait = 0, sumGuest = 0;
   auto t0 = std::chrono::steady_clock::now();

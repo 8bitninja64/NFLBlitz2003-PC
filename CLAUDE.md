@@ -22,7 +22,12 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   hand overrides in `config/sdk_symbols_manual.txt`, extra names in `config/symbols.txt`.
 - `config/hooks.txt` — functions replaced by `HLE(name)` in `src/runtime/hle_*.cpp`. `?<name|addr> = X` is a
   pre-hook: the function is still translated but first calls HLE_X with r0 = 0 and returns if X set r0 = 1
-  (hle_movie.cpp skips logo.pss/povlogo.pss at boot: skip_logos setting).
+  (hle_movie.cpp skips logo.pss/povlogo.pss/intro.pss at boot: skip_logos setting).
+- Fast boot (skip_logos): the legal/license/memory card screens are timed in frames; from the front end
+  loop's start (pre-hook on 8002CE68) guest time runs 8x (cpu.cpp setTimeWarp: time base, retraces,
+  alarm waits) until the bridge has built 1100 frames (the title appears at frame 1120). The card is
+  still mounted and read. BLITZ_FASTBOOT=<frame>,<factor> tunes it; BLITZ_WATCH=addr[+words],... logs
+  guest words when they change (per retrace).
 - `src/runtime/`:
   - ctx.h (guest Ctx, BE memory access, MMIO slow path for ea >= 0xCC000000, trace macros), cpu.cpp
     (indirect calls, SPRs, rfi, paired-single quantization), memory.cpp (MMIO dispatch).

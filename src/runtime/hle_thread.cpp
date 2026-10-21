@@ -90,7 +90,7 @@ void alarmThread() {
       if (it->second.fire < next->second.fire) next = it;
     uint64_t now = guest::timeBase();
     if (next->second.fire > now) {
-      g_alarmCv.wait_for(lk, nanoseconds(ticksToNs(next->second.fire - now)));
+      g_alarmCv.wait_for(lk, nanoseconds(ticksToNs(next->second.fire - now) / guest::timeWarp()));
       continue;
     }
     uint32_t alarm = next->first;

@@ -67,6 +67,8 @@ uint32_t readSpr(Ctx& c, uint32_t spr, uint32_t pc);
 void writeSpr(Ctx& c, uint32_t spr, uint32_t v, uint32_t pc);
 void writeMsr(Ctx& c, uint32_t v);
 uint64_t timeBase();
+void setTimeWarp(uint32_t factor);  // runtime only: guest time runs factor x real time
+uint32_t timeWarp();
 void psqLoad(Ctx& c, int fd, uint32_t ea, int w, int i);
 void psqStore(Ctx& c, int fs, uint32_t ea, int w, int i);
 void dcbzL(Ctx& c, uint32_t ea);
