@@ -94,6 +94,9 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   build/shots through Aurora's copy readback: no window capture, works covered/background. Needs
   `BLITZ_SET=msaa=1`. `tools/shotsheet.py <out.png> [div] [alpha]` makes a contact sheet,
   `tools/crop.ps1` zooms. Frame numbers are presented frames (the same counter as BLITZ_GX_DUMP).
+- Dolphin reference: tools/dtm_from_script.py turns a BLITZ_INPUT script into a .dtm movie; run
+  _Tools/Dolphin-x64 with `-u _Tools/dolphin_user_blitz -b -m movie -e iso` (frame/audio dumping on in that
+  profile). Movies need the origin bit, tickCount and a start time; playback is still unreliable here.
 - Bisecting draws: `BLITZ_GX_SKIPFMT=<texfmt>`, `BLITZ_GX_SKIPBLEND=<hex>`, `BLITZ_GX_BPREPL=reg:val:new`,
   `BLITZ_GX_XFAND=addr:mask`, `BLITZ_GX_LOGBP=f6,fe`, `BLITZ_GX_FSDEBUG` (full-screen 2D decisions),
   `BLITZ_GX_NRMSTATS`. `tools/ddssheet.py` sheets Aurora texture dumps (dump_textures=on).
@@ -107,6 +110,9 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   experiment is replayed at every start, so delete it when debugging shader/state crashes.
 
 ## Gotchas
+- Aurora fixes live in patches/aurora/*.patch (tools/build.ps1 applies them; the submodule stays at
+  upstream). 0001: @invariant vertex position: overlays drawn on the same vertices with LEQUAL
+  (jersey names/numbers, face details, helmet shine) z-failed between shader variants.
 - Aurora's BP 0x59 (scissor box offset) sign convention is the opposite of hardware; the bridge negates it.
 - Aurora needs its own GXInit called once (defaults); the game's stream then overrides it.
 - Hardware GX has no vertex array sizes: the bridge sizes them from each draw's max index.

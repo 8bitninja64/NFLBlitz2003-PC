@@ -157,7 +157,7 @@ private:
   bool m_dumpTextures = false;
   uint64_t m_arrayBytes = 0, m_arrayLoads = 0;  // per frame
   uint64_t m_invalidates = 0, m_invalidatedBytes = 0;
-  uint32_t m_bp40 = 0, m_bp41 = 0, m_bpF3 = 0, m_bp42 = 0, m_bp43 = 0;
+  uint32_t m_genMode = 0, m_bp40 = 0, m_bp41 = 0, m_bpF3 = 0, m_bp42 = 0, m_bp43 = 0;
   std::unordered_map<uint64_t, uint32_t> m_blendHist;
   std::deque<std::pair<uint32_t, std::vector<uint8_t>>> m_ring;  // BLITZ_GX_RING
   // BLITZ_GX_HAZARD: memory a draw referenced that changed before Aurora reads it.
@@ -374,6 +374,7 @@ void Bridge::bp(uint32_t v, const uint8_t* raw) {
       return;
     }
     break;
+  case 0x00: m_genMode = v & 0xFFFFFF; break;
   case 0x40: m_bp40 = v & 0xFFFFFF; break;
   case 0x41: m_bp41 = v & 0xFFFFFF; break;
   case 0xF3: m_bpF3 = v & 0xFFFFFF; break;
@@ -501,6 +502,37 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
         }
       }
       if (hazard) noteUse(arr, m_arrays[arr].base, maxIndex[arr] * stride + elem);
+    }
+  }
+  // BLITZ_GX_POSLOG=<stages>: log indexed positions of draws with this many TEV stages (debugging).
+  static const int posLogStages = getenv("BLITZ_GX_POSLOG") ? atoi(getenv("BLITZ_GX_POSLOG")) : 0;
+  if (posLogStages && (int)field(m_genMode, 4, 10) + 1 >= posLogStages - 1 && attrs[gxfifo::kAttrPos].type >= 2) {
+    static int logged = 0;
+    if (logged < 60) {
+      logged++;
+      const Array& pa = m_arrays[0];
+      uint32_t offset = 0;
+      for (int i = 0; i < gxfifo::kAttrPos; i++) offset += attrs[i].size;
+      std::string line;
+      const uint8_t* v = p + 3 + offset;
+      uint32_t stride = 0;
+      for (int i = 0; i < gxfifo::kNumAttrs; i++) stride += attrs[i].size;
+      for (uint32_t n = 0; n < count && n < 3; n++, v += stride) {
+        uint32_t idx = attrs[gxfifo::kAttrPos].type == 2 ? v[0] : (uint32_t)v[0] << 8 | v[1];
+        const uint8_t* e = hostPhys(pa.base + idx * pa.stride);
+        float c[3];
+        for (int j = 0; j < 3; j++) {
+          uint32_t bits = be32(e + 4 * j);
+          memcpy(&c[j], &bits, 4);
+        }
+        char b[96];
+        snprintf(b, sizeof(b), " [%u]=(%.2f %.2f %.2f)", idx, c[0], c[1], c[2]);
+        line += b;
+      }
+      float m3;
+      memcpy(&m3, &m_xfMtx[(m_mtxIdxA & 63) * 4 + 3], 4);
+      LOG_INFO("pos stages=%u n=%u base %08X stride %u mtx %u tx %.1f:%s", field(m_genMode, 4, 10) + 1, count, pa.base,
+               pa.stride, m_mtxIdxA & 63, m3, line.c_str());
     }
   }
   const settings::Settings& st = settings::get();

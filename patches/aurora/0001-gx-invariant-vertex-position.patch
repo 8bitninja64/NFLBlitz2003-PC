@@ -1,0 +1,20 @@
+GX shaders: make the vertex position invariant.
+
+Games draw overlays on exactly the same vertices as an earlier pass (NFL Blitz 2003: jersey
+names/numbers and face details over the body, depth test LEQUAL). On hardware both passes produce
+identical depth; different WGSL shader variants may not, so the overlay failed the depth test and
+vanished. @invariant makes every shader compute the position the same way.
+
+diff --git a/lib/gx/shader.cpp b/lib/gx/shader.cpp
+index 2d10095..b9ee354 100644
+--- a/lib/gx/shader.cpp
++++ b/lib/gx/shader.cpp
+@@ -1990,7 +1990,7 @@ var<storage, read> abuf: array<u32>;
+ var<uniform> ubuf: Uniform;{1}
+ 
+ struct VertexOutput {{
+-    @builtin(position) pos: vec4f,{2}
++    @builtin(position) @invariant pos: vec4f,{2}
+ }};
+ 
+ @vertex
