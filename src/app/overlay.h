@@ -10,8 +10,12 @@ struct Actions {
   void (*quit)();
 };
 
-void init(const Actions& actions);
+void init(const Actions& actions);  // after aurora_initialize (loads the menu fonts)
 bool isOpen();
+bool ownsPads();  // the game must not see the pads (menu open, or its buttons still held)
+// Controller input for the menu, per port (GameCube PAD buttons/sticks, as the game reads them).
+// Z+Start (or the Back button of a PC gamepad, see main_window) opens and closes the menu.
+void padInput(const unsigned short buttons[4], const signed char stickX[4], const signed char stickY[4]);
 bool isCapturingKey();  // the Controls tab waits for a key (Esc must not close the menu)
 void toggle();
 void close();

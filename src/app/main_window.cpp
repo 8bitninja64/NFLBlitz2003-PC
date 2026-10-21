@@ -26,6 +26,7 @@
 #include <aurora/main.h>
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_audio.h>
+#include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_scancode.h>
@@ -103,10 +104,30 @@ static void pollPads() {
   PADStatus st[PAD_MAX_CONTROLLERS] = {};
   PADRead(st);
   padinput::Pad pads[padinput::kPorts];
+  unsigned short buttons[4];
+  signed char sx[4], sy[4];
+  for (int i = 0; i < 4; i++) {
+    bool ok = i < PAD_MAX_CONTROLLERS && st[i].err == PAD_ERR_NONE;
+    buttons[i] = ok ? st[i].button : 0;
+    sx[i] = ok ? st[i].stickX : 0;
+    sy[i] = ok ? st[i].stickY : 0;
+  }
+  // The Back/View/Select button of a PC gamepad also opens the menu (GameCube pads: Z+Start).
+  static bool backWas = false;
+  bool back = false;
+  int nGamepads = 0;
+  if (SDL_JoystickID* ids = SDL_GetGamepads(&nGamepads)) {
+    for (int i = 0; i < nGamepads; i++)
+      if (SDL_Gamepad* gp = SDL_GetGamepadFromID(ids[i])) back |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_BACK);
+    SDL_free(ids);
+  }
+  if (back && !backWas) overlay::toggle();
+  backWas = back;
+  overlay::padInput(buttons, sx, sy);
   for (int i = 0; i < padinput::kPorts; i++) {
     pads[i] = {st[i].button, st[i].stickX, st[i].stickY, st[i].substickX, st[i].substickY, st[i].triggerLeft,
                st[i].triggerRight, st[i].analogA, st[i].analogB, st[i].err};
-    if (overlay::isOpen()) pads[i] = {0, 0, 0, 0, 0, 0, 0, 0, 0, st[i].err};  // the menu has the input
+    if (overlay::ownsPads()) pads[i] = {0, 0, 0, 0, 0, 0, 0, 0, 0, st[i].err};  // the menu has the input
     uint32_t cmd;
     if (padinput::takeMotor(i, &cmd)) PADControlMotor((u32)i, cmd);
   }

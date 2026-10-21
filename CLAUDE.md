@@ -185,6 +185,15 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   gameplay callers of RwCameraFrustumTestSphere (80203570 from 8002EF38 off-screen pass target and
   8006A464 off-screen catch-up), which FrustumTestForLogic swaps in. 3D particles (80112978) still cull
   in 4:3 screen space. BLITZ_NO_WIDECULL=1 for A/B.
+- Cheats (hle_cheats.cpp, F1 > Cheats, settings key cheats = hex mask of cheat ids): the game's own
+  versus-screen codes. Table 0x80274A6C (0x1C: icon1-3, dpad, id, name, subtitle; 58 entries); active
+  cheats are per-port masks at 0x80286040+0x64+port*8 (bit = id), cleared only in the front end. The
+  MatchCheats pre-hook on match setup 8004A098 (return address 80033E24, not the attract demo) sets the
+  menu's cheats on all ports; live-read ones are also written while the menu has the game paused.
+- F1 menu (overlay.cpp): pads drive it as ImGui keyboard navigation (overlay::padInput from PADRead,
+  so GC adapters and SDL pads alike); Z+Start or a PC pad's Back button toggles it, and the game gets
+  no pad input until the buttons are released (overlay::ownsPads). Fonts: system Segoe UI / DejaVu / Noto.
+- tools/package.ps1 -Zip: release archive (~17 MB; no game code).
 - Discs are read through nod (aurora::dvd's dependency): ISO, RVZ, WIA, CISO, GCZ, NFS.
 - Don't write C/C++ with escapes through bash heredocs/python-in-bash; use the Write/Edit tools.
 

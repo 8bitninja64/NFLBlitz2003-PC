@@ -1,5 +1,6 @@
 #include "overlay.h"
 
+#include "cheats.h"
 #include "settings.h"
 
 #include <SDL3/SDL_keyboard.h>
@@ -151,21 +152,112 @@ void drawControls() {
   ImGui::TextDisabled("F1: this menu   Alt+Enter / F11: fullscreen");
 }
 
-void drawSettings() {
-  settings::Settings& st = settings::get();
+// --- look ---------------------------------------------------------------------------
+// Blitz colours: dark navy panels, red accent, steel blue highlights.
+const ImVec4 kRed(0.86f, 0.12f, 0.16f, 1.0f);
+const ImVec4 kBlue(0.16f, 0.42f, 0.86f, 1.0f);
+const ImVec4 kGold(1.0f, 0.80f, 0.25f, 1.0f);
+ImFont* g_fontBody = nullptr;
+ImFont* g_fontTitle = nullptr;
+constexpr float kFontPx = 40.0f;  // rasterized large, scaled down to the window (stays sharp)
+
+void applyStyle() {
+  ImGuiStyle& s = ImGui::GetStyle();
+  s.WindowRounding = 10;
+  s.ChildRounding = 8;
+  s.FrameRounding = 6;
+  s.GrabRounding = 6;
+  s.PopupRounding = 6;
+  s.WindowBorderSize = 0;
+  s.FrameBorderSize = 0;
+  s.WindowPadding = ImVec2(18, 16);
+  s.FramePadding = ImVec2(10, 6);
+  s.ItemSpacing = ImVec2(10, 9);
+  s.ScrollbarSize = 14;
+  ImVec4* c = s.Colors;
+  c[ImGuiCol_WindowBg] = ImVec4(0.04f, 0.06f, 0.12f, 0.96f);
+  c[ImGuiCol_ChildBg] = ImVec4(0.07f, 0.10f, 0.19f, 1.0f);
+  c[ImGuiCol_PopupBg] = ImVec4(0.06f, 0.09f, 0.17f, 0.98f);
+  c[ImGuiCol_Text] = ImVec4(0.94f, 0.95f, 0.98f, 1.0f);
+  c[ImGuiCol_TextDisabled] = ImVec4(0.55f, 0.60f, 0.72f, 1.0f);
+  c[ImGuiCol_FrameBg] = ImVec4(0.12f, 0.17f, 0.30f, 1.0f);
+  c[ImGuiCol_FrameBgHovered] = ImVec4(0.17f, 0.25f, 0.44f, 1.0f);
+  c[ImGuiCol_FrameBgActive] = ImVec4(0.20f, 0.30f, 0.52f, 1.0f);
+  c[ImGuiCol_CheckMark] = kGold;
+  c[ImGuiCol_SliderGrab] = kRed;
+  c[ImGuiCol_SliderGrabActive] = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
+  c[ImGuiCol_Button] = ImVec4(0.14f, 0.20f, 0.36f, 1.0f);
+  c[ImGuiCol_ButtonHovered] = kBlue;
+  c[ImGuiCol_ButtonActive] = kRed;
+  c[ImGuiCol_Header] = ImVec4(0.16f, 0.24f, 0.44f, 1.0f);
+  c[ImGuiCol_HeaderHovered] = kBlue;
+  c[ImGuiCol_HeaderActive] = kRed;
+  c[ImGuiCol_Separator] = ImVec4(0.25f, 0.32f, 0.50f, 1.0f);
+  c[ImGuiCol_NavHighlight] = kGold;
+  c[ImGuiCol_TableRowBg] = ImVec4(0, 0, 0, 0);
+  c[ImGuiCol_TableRowBgAlt] = ImVec4(1, 1, 1, 0.03f);
+}
+
+// A system UI font when there is one (nothing to ship): Segoe UI on Windows, DejaVu/Noto on Linux.
+void loadFonts() {
   ImGuiIO& io = ImGui::GetIO();
-  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing,
-                          ImVec2(0.5f, 0.5f));
-  ImGui::SetNextWindowSize(ImVec2(460 * io.FontGlobalScale, 0), ImGuiCond_Appearing);
-  bool open = true;
-  if (!ImGui::Begin("NFL Blitz 2003 - Settings (game paused)", &open,
-                    ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::End();
-    return;
+  const char* body[] = {"C:/Windows/Fonts/segoeui.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                        "/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+                        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"};
+  const char* title[] = {"C:/Windows/Fonts/seguibl.ttf", "C:/Windows/Fonts/segoeuib.ttf",
+                         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+                         "/usr/share/fonts/noto/NotoSans-Bold.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"};
+  auto load = [&](const char* const* paths, size_t n, float px) -> ImFont* {
+    for (size_t i = 0; i < n; i++) {
+      if (FILE* f = fopen(paths[i], "rb")) {
+        fclose(f);
+        if (ImFont* font = io.Fonts->AddFontFromFileTTF(paths[i], px)) return font;
+      }
+    }
+    return nullptr;
+  };
+  g_fontBody = load(body, sizeof(body) / sizeof(body[0]), kFontPx);
+  if (!g_fontBody) {
+    ImFontConfig cfg;
+    cfg.SizePixels = 13;
+    g_fontBody = io.Fonts->AddFontDefault(&cfg);
   }
+  g_fontTitle = load(title, sizeof(title) / sizeof(title[0]), kFontPx * 1.4f);
+  if (!g_fontTitle) g_fontTitle = g_fontBody;
+  io.FontDefault = g_fontBody;
+}
+
+// --- controller ----------------------------------------------------------------------
+// Pad buttons arrive as GameCube PAD bits; the menu is driven as ImGui keyboard navigation so GC
+// adapters and any SDL gamepad behave the same.
+unsigned short g_padHeld = 0, g_padPrev = 0;
+bool g_holdInput = false;  // after the menu toggled: pads stay away from the game until released
+int g_section = 0;  // the selected menu section
+enum Section { kDisplay, kAudio, kControls, kCheats, kAbout, kSectionCount };
+const char* kSectionNames[kSectionCount] = {"Display", "Audio", "Controls", "Cheats", "About"};
+
+void feedNav() {
+  ImGuiIO& io = ImGui::GetIO();
+  unsigned short now = g_padHeld, changed = now ^ g_padPrev;
+  auto key = [&](unsigned short bit, ImGuiKey k) {
+    if (changed & bit) io.AddKeyEvent(k, (now & bit) != 0);
+  };
+  key(PAD_BUTTON_UP, ImGuiKey_UpArrow);
+  key(PAD_BUTTON_DOWN, ImGuiKey_DownArrow);
+  key(PAD_BUTTON_LEFT, ImGuiKey_LeftArrow);
+  key(PAD_BUTTON_RIGHT, ImGuiKey_RightArrow);
+  key(PAD_BUTTON_A, ImGuiKey_Space);   // activate / toggle
+  key(PAD_BUTTON_B, ImGuiKey_Escape);  // cancel
+  g_padPrev = now;
+}
+
+// Edge-triggered pad buttons for this frame (menu-level actions: sections, closing).
+unsigned short g_padPressed = 0;
+
+// --- sections ------------------------------------------------------------------------
+bool drawDisplay(settings::Settings& st) {
   bool changed = false;
-  if (ImGui::BeginTabBar("tabs")) {
-    if (ImGui::BeginTabItem("Display")) {
+  {
       bool fs = st.fullscreen;
       if (ImGui::Checkbox("Fullscreen (Alt+Enter / F11)", &fs)) {
         st.fullscreen = fs;
@@ -212,55 +304,204 @@ void drawSettings() {
       changed |= ImGui::Checkbox("VSync", &st.vsync);
       changed |= ImGui::Checkbox("Load texture packs (Textures/GO3E5D)", &st.texturePacks);
       changed |= ImGui::Checkbox("Dump textures (for pack makers)", &st.dumpTextures);
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Audio")) {
-      if (ImGui::SliderInt("Volume", &st.volume, 0, 100, "%d%%")) {
-        if (g_actions.setVolume) g_actions.setVolume(st.mute ? 0.0f : st.volume / 100.0f);
-        changed = true;
-      }
-      if (ImGui::Checkbox("Mute", &st.mute)) {
-        if (g_actions.setVolume) g_actions.setVolume(st.mute ? 0.0f : st.volume / 100.0f);
-        changed = true;
-      }
-      ImGui::EndTabItem();
-    }
-    // BLITZ_MENU_TAB=Controls selects that tab once (screenshots).
-    static const char* startTab = getenv("BLITZ_MENU_TAB");
-    auto tabFlags = [](const char* name) {
-      if (!startTab || strcmp(startTab, name)) return ImGuiTabItemFlags_None;
-      startTab = nullptr;
-      return ImGuiTabItemFlags_SetSelected;
-    };
-    if (ImGui::BeginTabItem("Controls", nullptr, tabFlags("Controls"))) {
-      drawControls();
-      ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("About")) {
-      ImGui::TextWrapped("NFL Blitz 2003 PC port: the GameCube executable from your own disc, statically "
-                         "recompiled to native code, rendered with Aurora.");
-      ImGui::Spacing();
-      ImGui::TextWrapped("Disc: %s", st.disc.c_str());
-      ImGui::TextWrapped("Settings: %s", settings::path().c_str());
-      ImGui::EndTabItem();
-    }
-    ImGui::EndTabBar();
   }
+  return changed;
+}
+
+bool drawAudio(settings::Settings& st) {
+  bool changed = false;
+  if (ImGui::SliderInt("Volume", &st.volume, 0, 100, "%d%%")) {
+    if (g_actions.setVolume) g_actions.setVolume(st.mute ? 0.0f : st.volume / 100.0f);
+    changed = true;
+  }
+  if (ImGui::Checkbox("Mute", &st.mute)) {
+    if (g_actions.setVolume) g_actions.setVolume(st.mute ? 0.0f : st.volume / 100.0f);
+    changed = true;
+  }
+  return changed;
+}
+
+bool drawCheats(settings::Settings& st) {
+  bool changed = false;
+  ImGui::TextWrapped("The game's own cheat codes, without entering them on the matchup screen. "
+                     "Gold ones work right away; the rest from the next game.");
+  ImGui::Spacing();
+  if (ImGui::BeginTable("cheats", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    for (int i = 0; i < cheats::kCount; i++) {
+      const cheats::Cheat& ch = cheats::kList[i];
+      uint64_t b = 1ull << ch.id;
+      bool on = (st.cheats & b) != 0;
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      if (ch.live) ImGui::PushStyleColor(ImGuiCol_Text, kGold);
+      bool clicked = ImGui::Checkbox(ch.name, &on);
+      if (ch.live) ImGui::PopStyleColor();
+      ImGui::TableSetColumnIndex(1);
+      ImGui::TextDisabled("%s", ch.info);
+      if (clicked) {
+        uint64_t before = st.cheats;
+        st.cheats = on ? (st.cheats | b) : (st.cheats & ~b);
+        if (on && ch.excludes != 0xFF) st.cheats &= ~(1ull << ch.excludes);
+        cheats::applyNow(st.cheats, before);  // the game is paused while the menu is open
+        changed = true;
+      }
+    }
+    ImGui::EndTable();
+  }
+  if (ImGui::Button("All off")) {
+    cheats::applyNow(0, st.cheats);
+    st.cheats = 0;
+    changed = true;
+  }
+  return changed;
+}
+
+void drawAbout(settings::Settings& st) {
+  ImGui::TextWrapped("NFL Blitz 2003 PC port: the GameCube executable from your own disc, statically "
+                     "recompiled to native code, rendered with Aurora.");
+  ImGui::Spacing();
+  ImGui::TextWrapped("Disc: %s", st.disc.c_str());
+  ImGui::TextWrapped("Settings: %s", settings::path().c_str());
+}
+
+void hint(const char* button, ImVec4 color, const char* action) {
+  ImGui::TextColored(color, "%s", button);
+  ImGui::SameLine(0, 4);
+  ImGui::TextDisabled("%s", action);
+  ImGui::SameLine(0, 22);
+}
+
+void drawSettings() {
+  settings::Settings& st = settings::get();
+  ImGuiIO& io = ImGui::GetIO();
+  // Menu-level pad actions: L/R switch sections, B closes the menu when nothing else wants it.
+  if (g_padPressed & PAD_TRIGGER_L) g_section = (g_section + kSectionCount - 1) % kSectionCount;
+  if (g_padPressed & PAD_TRIGGER_R) g_section = (g_section + 1) % kSectionCount;
+  if ((g_padPressed & PAD_BUTTON_B) && !ImGui::IsAnyItemActive() &&
+      !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) && g_capture < 0) {
+    g_open = false;
+    g_holdInput = true;
+    return;
+  }
+  // BLITZ_MENU_TAB=<section> selects that section once (screenshots).
+  if (static const char* startTab = getenv("BLITZ_MENU_TAB"); startTab) {
+    for (int i = 0; i < kSectionCount; i++)
+      if (!strcmp(startTab, kSectionNames[i])) g_section = i;
+    startTab = nullptr;
+  }
+  ImVec2 size(io.DisplaySize.x * 0.72f, io.DisplaySize.y * 0.80f);
+  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+  if (!ImGui::Begin("##settings", nullptr,
+                    ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings)) {
+    ImGui::End();
+    return;
+  }
+  // Header: title with a red/blue stripe.
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  ImVec2 wp = ImGui::GetWindowPos();
+  float stripe = ImGui::GetFontSize() / 3.0f;
+  dl->AddRectFilled(wp, ImVec2(wp.x + size.x, wp.y + stripe), ImGui::GetColorU32(kRed), 10, ImDrawFlags_RoundCornersTop);
+  dl->AddRectFilled(ImVec2(wp.x, wp.y + stripe), ImVec2(wp.x + size.x, wp.y + stripe * 1.6f), ImGui::GetColorU32(kBlue));
+  ImGui::Dummy(ImVec2(0, stripe));
+  ImGui::PushFont(g_fontTitle);
+  ImGui::TextColored(ImVec4(1, 1, 1, 1), "NFL BLITZ 2003");
+  ImGui::PopFont();
+  ImGui::SameLine();
+  ImGui::SetCursorPosY(ImGui::GetCursorPosY() + ImGui::GetTextLineHeight() * 0.35f);
+  ImGui::TextDisabled("SETTINGS  -  game paused");
+  ImGui::Spacing();
+
+  float footer = ImGui::GetFrameHeightWithSpacing() * 1.6f;
+  float sideW = size.x * 0.22f;
+  bool changed = false;
+  // Sections.
+  ImGui::BeginChild("##sections", ImVec2(sideW, -footer), ImGuiChildFlags_None);
+  ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.1f, 0.5f));
+  for (int i = 0; i < kSectionCount; i++) {
+    bool sel = g_section == i;
+    if (sel) ImGui::PushStyleColor(ImGuiCol_Header, kRed);
+    if (ImGui::Selectable(kSectionNames[i], sel, 0, ImVec2(0, ImGui::GetTextLineHeight() * 1.8f))) g_section = i;
+    if (sel) ImGui::PopStyleColor();
+  }
+  ImGui::PopStyleVar();
+  ImGui::EndChild();
+  ImGui::SameLine();
+  // Content.
+  ImGui::BeginChild("##content", ImVec2(0, -footer), ImGuiChildFlags_AlwaysUseWindowPadding);
+  ImGui::PushFont(g_fontTitle);
+  ImGui::TextColored(kGold, "%s", kSectionNames[g_section]);
+  ImGui::PopFont();
   ImGui::Separator();
-  if (ImGui::Button("Resume (F1)")) open = false;
+  ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.45f);
+  switch (g_section) {
+  case kDisplay: changed |= drawDisplay(st); break;
+  case kAudio: changed |= drawAudio(st); break;
+  case kControls: drawControls(); break;
+  case kCheats: changed |= drawCheats(st); break;
+  case kAbout: drawAbout(st); break;
+  }
+  ImGui::PopItemWidth();
+  ImGui::EndChild();
+  // Footer: controller hints and the resume/quit buttons.
+  ImGui::Spacing();
+  hint("A", ImVec4(0.3f, 0.85f, 0.4f, 1), "select");
+  hint("B", kRed, "back");
+  hint("L / R", kBlue, "section");
+  hint("Z+Start / F1", kGold, "close");
+  float bw = ImGui::CalcTextSize("Quit game").x + ImGui::GetStyle().FramePadding.x * 2;
+  float rw = ImGui::CalcTextSize("Resume").x + ImGui::GetStyle().FramePadding.x * 2;
+  ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - bw - rw - ImGui::GetStyle().ItemSpacing.x);
+  if (ImGui::Button("Resume")) g_open = false;
   ImGui::SameLine();
   if (ImGui::Button("Quit game") && g_actions.quit) g_actions.quit();
   ImGui::End();
   if (changed) settings::save();
-  if (!open) g_open = false;
 }
 
 }  // namespace
 
-void init(const Actions& actions) { g_actions = actions; }
+void init(const Actions& actions) {
+  g_actions = actions;
+  loadFonts();
+  applyStyle();
+  ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+}
+
+void padInput(const unsigned short buttons[4], const signed char stickX[4], const signed char stickY[4]) {
+  unsigned short held = 0;
+  for (int i = 0; i < 4; i++) {
+    unsigned short b = buttons[i];
+    // The main stick navigates like the D-pad.
+    if (stickY[i] > 50) b |= PAD_BUTTON_UP;
+    if (stickY[i] < -50) b |= PAD_BUTTON_DOWN;
+    if (stickX[i] < -50) b |= PAD_BUTTON_LEFT;
+    if (stickX[i] > 50) b |= PAD_BUTTON_RIGHT;
+    held |= b;
+  }
+  static unsigned short last = 0;
+  unsigned short pressed = held & ~last;
+  last = held;
+  const unsigned short combo = PAD_TRIGGER_Z | PAD_BUTTON_START;
+  if (g_holdInput && !held) g_holdInput = false;
+  if ((held & combo) == combo && (pressed & combo)) {
+    g_open = !g_open;
+    g_capture = -1;
+    g_padHeld = g_padPrev = 0;
+    g_holdInput = true;  // the game gets the pads back once everything is released
+    return;
+  }
+  g_padPressed |= pressed;
+  if (g_open) g_padHeld = held;
+}
+
 bool isOpen() { return g_open; }
+bool ownsPads() { return g_open || g_holdInput; }
 bool isCapturingKey() { return g_open && g_capture >= 0; }
-void toggle() { g_open = !g_open; }
+void toggle() {
+  g_open = !g_open;
+  g_holdInput = true;
+}
 void close() {
   g_open = false;
   g_capture = -1;
@@ -269,10 +510,16 @@ void close() {
 void draw(float presentedFps, unsigned long long frame) {
   // Scale the UI with the window (the default font is tiny on large or high-DPI windows).
   ImGuiIO& io = ImGui::GetIO();
-  float scale = io.DisplaySize.y / 540.0f;
-  io.FontGlobalScale = scale < 1.0f ? 1.0f : scale > 4.0f ? 4.0f : scale;
+  // The fonts are rasterized at kFontPx: scale them to ~18 px per 540 lines of window.
+  float px = 18.0f * io.DisplaySize.y / 540.0f;
+  px = px < 15.0f ? 15.0f : px > 72.0f ? 72.0f : px;
+  io.FontGlobalScale = px / (g_fontBody && g_fontBody->FontSize > 20 ? kFontPx : 13.0f);
   if (settings::get().showFps || getenv("BLITZ_FRAMENO")) drawFps(presentedFps, frame);
-  if (g_open) drawSettings();
+  if (g_open) {
+    feedNav();
+    drawSettings();
+  }
+  g_padPressed = 0;
 }
 
 }  // namespace overlay

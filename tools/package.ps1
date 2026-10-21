@@ -1,8 +1,9 @@
 # Assembles a distributable folder (dist/NFLBlitz2003) WITHOUT any game code: the runtime and its
 # libraries plus the files the first start needs to compile the game module from the player's own
 # disc (recompiler, configuration, module headers). Build the runtime first (tools/build.ps1).
-#   powershell -ExecutionPolicy Bypass -File tools/package.ps1 [-Out dist/NFLBlitz2003]
-param([string]$Out = "dist/NFLBlitz2003")
+#   powershell -ExecutionPolicy Bypass -File tools/package.ps1 [-Out dist/NFLBlitz2003] [-Zip]
+#   (-Zip also writes <Out>-windows-x64.zip, the release archive: ~17 MB)
+param([string]$Out = "dist/NFLBlitz2003", [switch]$Zip)
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
@@ -40,3 +41,9 @@ if (Test-Path "$deps/sdl3_prebuilt-src/licenses") {
 $bad = Get-ChildItem -Recurse $Out | Where-Object { $_.Name -match '^(blitz_game\.dll|recomp_\d+\.cpp|main\.dol)$' -or $_.Extension -in ".iso", ".rvz" }
 if ($bad) { throw "game data in the package: $($bad.FullName -join ', ')" }
 Write-Host "packaged $Out ($([math]::Round((Get-ChildItem -Recurse $Out | Measure-Object Length -Sum).Sum / 1MB)) MB)"
+if ($Zip) {
+  $zipPath = "$Out-windows-x64.zip"
+  if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+  Compress-Archive -Path $Out -DestinationPath $zipPath
+  Write-Host "zipped $zipPath ($([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MB)"
+}

@@ -63,3 +63,5 @@ CARDGetSectorSize
 # and stadium vanished at the sides of a 16:9 match), game logic keeps testing the game's 4:3 view
 ?0x80201AEC = WideCullFrustum
 ?0x80203570 = FrustumTestForLogic
+# Cheats (hle_cheats.cpp): pre-hook on match setup, switches on the F1 menu's cheats
+?0x8004A098 = MatchCheats
