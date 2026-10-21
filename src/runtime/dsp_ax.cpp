@@ -4,7 +4,11 @@
 #include "log.h"
 #include "memory.h"
 
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <unordered_map>
 
 namespace ax {
 
@@ -70,13 +74,14 @@ void storePb(const Voice& v, uint32_t addr) {
 // Reads the next source sample, advancing the address with loop/end handling.
 // Returns false when the voice has ended (and the sample is silence).
 struct Source {
-  Voice& v;
+  Voice* pv;
   uint32_t cur, end, loop;
   uint16_t format, ps;
   int16_t yn1, yn2;
   bool stopped = false;
 
-  explicit Source(Voice& voice) : v(voice) {
+  explicit Source(Voice& voice) : pv(&voice) {
+    Voice& v = *pv;
     cur = v.at32(PB_CUR_ADDR);
     end = v.at32(PB_END_ADDR);
     loop = v.at32(PB_LOOP_ADDR);
@@ -87,6 +92,7 @@ struct Source {
   }
 
   void save() {
+    Voice& v = *pv;
     v.set32(PB_CUR_ADDR, cur);
     v.at(PB_ADPCM_PS) = ps;
     v.at(PB_ADPCM_YN1) = (uint16_t)yn1;
@@ -94,6 +100,7 @@ struct Source {
   }
 
   int16_t decode() {
+    Voice& v = *pv;
     switch (format) {
     case 0x00: {  // DSP ADPCM: addresses in nibbles, 2-nibble header per 16-nibble frame
       if ((cur & 15) == 0) {
@@ -122,6 +129,7 @@ struct Source {
   }
 
   int16_t next() {
+    Voice& v = *pv;
     if (stopped) return 0;
     int16_t s = decode();
     if (cur == end) {
@@ -160,48 +168,109 @@ void applyUpdates(Voice& v, int subframe) {
 
 uint32_t g_playing = 0;  // voices rendered in the current list (debug stats)
 
+// Sample-rate conversion: 32-tap Blackman-windowed sinc, 128 phases, 64 cutoff bands. The
+// cutoff follows the pitch so that pitched-up voices are low-passed instead of aliasing.
+// Table generation and the coefficient-select mapping follow AxioDL/musyx's native PC
+// renderer (src/musyx/runtime/hw_pc.c, CC0-1.0). The hardware's own 4-tap table is not used.
+constexpr int kTaps = 32, kPhases = 128, kBands = 64;
+int32_t g_sinc[kBands][kPhases][kTaps];
+
+void initSinc() {
+  static bool done = false;
+  if (done) return;
+  done = true;
+  const double pi = 3.14159265358979323846;
+  for (int band = 0; band < kBands; band++) {
+    double cutoff = (double)(band + 1) / kBands;
+    for (int phase = 0; phase < kPhases; phase++) {
+      double c[kTaps], sum = 0;
+      double center = kTaps / 2 - 1 + (double)phase / kPhases;
+      for (int tap = 0; tap < kTaps; tap++) {
+        double x = tap - center;
+        double a = 2 * pi * x / kTaps;
+        double window = 0.42 + 0.5 * std::cos(a) + 0.08 * std::cos(2 * a);
+        double xc = cutoff * x;
+        double sinc = std::fabs(xc) < 1e-12 ? 1.0 : std::sin(pi * xc) / (pi * xc);
+        c[tap] = cutoff * sinc * window;
+        sum += c[tap];
+      }
+      int32_t total = 0;
+      for (int tap = 0; tap < kTaps; tap++) {
+        g_sinc[band][phase][tap] = (int32_t)std::lround(c[tap] / sum * (1 << 23));
+        total += g_sinc[band][phase][tap];
+      }
+      g_sinc[band][phase][kTaps / 2] += (1 << 23) - total;  // exact unity gain
+    }
+  }
+}
+
+// Per-voice resampler history (the parameter block only has room for 4 samples).
+struct Resampler {
+  int16_t hist[kTaps] = {};
+  uint32_t idx = 0;
+  uint32_t endCur = 0;  // source address after the last frame: a different one means a restart
+  bool valid = false;
+};
+std::unordered_map<uint32_t, Resampler> g_resamplers;
+
 void renderVoice(uint32_t pbAddr) {
   Voice v;
   loadPb(v, pbAddr);
-  if (v.at(PB_STATE) != 1) return;
-  g_playing++;
+  if (v.at(PB_STATE) != 1) {
+    // A voice can be started by this frame's update list (MusyX writes it stopped and queues
+    // the state change); idle voices without updates are skipped.
+    bool updates = false;
+    for (int k = 0; k < kSubframes; k++) updates |= v.at(PB_UPD_NUM + 2 * k) != 0;
+    if (!updates) return;
+  }
 
   Source src(v);
-  uint32_t ratio = v.at32(PB_SRC_RATIO);
+  Resampler& rs = g_resamplers[pbAddr];
+  bool wasPlaying = v.at(PB_STATE) == 1;
+  if (!rs.valid || rs.endCur != src.cur || !wasPlaying) {
+    rs = Resampler{};
+    rs.valid = true;
+  }
   uint32_t frac = v.at(PB_SRC_FRAC);
-  int16_t hist[4];
-  for (int i = 0; i < 4; i++) hist[i] = (int16_t)v.at(PB_SRC_LAST + 2 * i);
   uint16_t srcSelect = v.at(PB_SRC_SELECT);
+  bool rendered = false;
 
   int32_t last[kBuses] = {};
   for (int sub = 0; sub < kSubframes; sub++) {
     applyUpdates(v, sub);
-    if (sub > 0 && v.at(PB_STATE) != 1) break;
-    if (sub > 0) ratio = v.at32(PB_SRC_RATIO);
+    if (v.at(PB_STATE) != 1) {
+      if (rendered) break;  // stopped during the frame
+      continue;             // not started yet
+    }
+    if (!rendered) {
+      rendered = true;
+      g_playing++;
+      if (!wasPlaying) src = Source(v);  // started by an update: take its fresh addresses
+    }
+    uint32_t ratio = srcSelect == 2 ? 0x10000 : v.at32(PB_SRC_RATIO);
+    uint32_t coef = v.at(PB_COEF_SELECT);
+    uint32_t cutoff = coef == 0 ? 32768 : coef == 1 ? 52428 : 65536;
+    if (ratio > 0x10000) cutoff = (uint32_t)((uint64_t)cutoff * 0x10000 / ratio);
+    int band = (int)(cutoff * kBands / 65536);
+    band = band < 1 ? 1 : band > kBands ? kBands : band;
     for (int n = sub * 32; n < sub * 32 + 32; n++) {
+      // 16.16 position: consume input samples into the history, then filter.
+      frac += ratio;
+      while (frac >= 0x10000) {
+        frac -= 0x10000;
+        rs.hist[rs.idx++ & (kTaps - 1)] = src.next();
+      }
       int32_t s;
       if (srcSelect == 2) {
-        s = src.next();
+        s = rs.hist[(rs.idx - 1) & (kTaps - 1)];
+      } else if (srcSelect == 1) {
+        int32_t older = rs.hist[(rs.idx - 2) & (kTaps - 1)], newer = rs.hist[(rs.idx - 1) & (kTaps - 1)];
+        s = older + (int32_t)((int64_t)(newer - older) * frac / 65536);
       } else {
-        // 16.16 position: consume input samples into the history, then interpolate.
-        frac += ratio;
-        while (frac >= 0x10000) {
-          frac -= 0x10000;
-          hist[0] = hist[1];
-          hist[1] = hist[2];
-          hist[2] = hist[3];
-          hist[3] = src.next();
-        }
-        float t = frac / 65536.0f;
-        if (srcSelect == 1) {
-          s = (int32_t)(hist[2] + (hist[3] - hist[2]) * t);
-        } else {
-          // Catmull-Rom between hist[1] and hist[2] (one sample of latency) stands in for
-          // the microcode's 4-tap polyphase filter.
-          float p0 = hist[0], p1 = hist[1], p2 = hist[2], p3 = hist[3];
-          float y = p1 + 0.5f * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
-          s = clamp16((int32_t)y);
-        }
+        const int32_t* c = g_sinc[band - 1][frac >> 9];
+        int64_t acc = 0;
+        for (int tap = 0; tap < kTaps; tap++) acc += (int64_t)rs.hist[(rs.idx + tap) & (kTaps - 1)] * c[tap];
+        s = clamp16((int32_t)(acc >> 23));
       }
       // Envelope.
       int32_t ve = v.at(PB_VE_VOL);
@@ -222,11 +291,14 @@ void renderVoice(uint32_t pbAddr) {
       }
     }
   }
-  if (src.stopped) v.at(PB_STATE) = 0;
-  src.save();
-  v.at(PB_SRC_FRAC) = (uint16_t)frac;
-  for (int i = 0; i < 4; i++) v.at(PB_SRC_LAST + 2 * i) = (uint16_t)hist[i];
-  for (int d = 0; d < 9; d++) v.at(PB_DPOP + 2 * d) = (uint16_t)clamp16(last[kDpopOrder[d]]);
+  if (rendered) {
+    if (src.stopped) v.at(PB_STATE) = 0;
+    src.save();
+    rs.endCur = src.cur;
+    v.at(PB_SRC_FRAC) = (uint16_t)frac;
+    for (int i = 0; i < 4; i++) v.at(PB_SRC_LAST + 2 * i) = (uint16_t)rs.hist[(rs.idx - 4 + i) & (kTaps - 1)];
+    for (int d = 0; d < 9; d++) v.at(PB_DPOP + 2 * d) = (uint16_t)clamp16(last[kDpopOrder[d]]);
+  }
   // The CPU owns the update list and the voice links; write back everything else.
   Voice mem;
   loadPb(mem, pbAddr);
@@ -287,6 +359,17 @@ void output(uint32_t surround, uint32_t dest) {
     guest::wr16(dest + 4 * n, (uint16_t)r);
     guest::wr16(dest + 4 * n + 2, (uint16_t)l);
   }
+  // BLITZ_WAV_DSP=<file>: raw s16 stereo (L, R) of every rendered frame, in render order.
+  static FILE* dump = getenv("BLITZ_WAV_DSP") ? fopen(getenv("BLITZ_WAV_DSP"), "wb") : nullptr;
+  if (dump) {
+    int16_t buf[kFrame * 2];
+    for (int n = 0; n < kFrame; n++) {
+      buf[2 * n] = (int16_t)guest::rd16(dest + 4 * n + 2);
+      buf[2 * n + 1] = (int16_t)guest::rd16(dest + 4 * n);
+    }
+    fwrite(buf, 4, kFrame, dump);
+    fflush(dump);
+  }
 }
 
 uint32_t phys(uint32_t a) { return (a & 0x01FFFFFF) | 0x80000000; }
@@ -294,6 +377,7 @@ uint32_t phys(uint32_t a) { return (a & 0x01FFFFFF) | 0x80000000; }
 }  // namespace
 
 void processCommandList(uint32_t list) {
+  initSinc();
   static uint32_t lists = 0, voices = 0;
   if (++lists % 400 == 0) {
     LOG_DEBUG("AX: %u lists, %.1f voices per list", lists, voices / 400.0);
@@ -308,6 +392,12 @@ void processCommandList(uint32_t list) {
   uint32_t p = phys(list);
   for (int guard = 0; guard < 4096; guard++) {
     uint16_t cmd = guest::rd16(p);
+    static const char* logCmds = getenv("BLITZ_AX_LOGCMDS");  // "<first list>,<count>"
+    if (logCmds) {
+      static unsigned first = (unsigned)atoi(logCmds), count = strchr(logCmds, ',') ? (unsigned)atoi(strchr(logCmds, ',') + 1) : 5;
+      if (lists >= first && lists < first + count)
+        LOG_INFO("AX list %u cmd %u args %08X %08X %04X", lists, cmd, rd32pair(p + 2), rd32pair(p + 6), guest::rd16(p + 10));
+    }
     auto arg32 = [&](int i) { return rd32pair(p + 2 + 4 * i); };
     switch (cmd) {
     case 0:  // SETUP spb

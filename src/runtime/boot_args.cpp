@@ -47,6 +47,14 @@ bool bootFromArgs(int argc, char** argv, BootOptions* opts) {
   // 1 ms scheduler granularity: retrace timing and Aurora's GPU-progress sleeps depend on it
   // (the default 15.6 ms tick turns sub-millisecond sleeps into whole ticks).
   timeBeginPeriod(1);
+  // Windows 11 ignores that request (and slows timers down) while the window is not the visible
+  // foreground one, which turned the 59.94 Hz pacing into 3 x 15.6 ms ticks (20 fps): opt out of
+  // timer-resolution and execution-speed (EcoQoS) throttling.
+  PROCESS_POWER_THROTTLING_STATE throttling{};
+  throttling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+  throttling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+  throttling.StateMask = 0;
+  SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof(throttling));
 #endif
   installCrashHandler();
   // Disc: --disc, BLITZ_DISC, the remembered path, the default name in the working

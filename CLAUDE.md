@@ -78,6 +78,9 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   LEFT RIGHT STICKUP/DOWN/LEFT/RIGHT). Reaching a match from boot (title ~22 s at 60 fps):
   START every 60 from 1300 (x12), A at 2200 and 2400 (continue without card), START every 60 from 2700
   (x6), then A every 120 from 3800.
+- `BLITZ_WAV_DSP=<file>` raw s16 L/R of every frame the DSP renders (compare with BLITZ_WAV to separate
+  mixing bugs from playback bugs); `BLITZ_AX_LOGCMDS=<list>,<n>` logs command lists; `tools/wavstat.py`
+  counts clicks (and their position in the 160-sample frame), dropouts, clipping-free spectral balance.
 - `BLITZ_WAV=<file>` records the AI output (32 kHz stereo WAV); `BLITZ_MUTE=1` opens no audio device;
   `-v` logs AX lists/voices every 2 s.
 - `BLITZ_PERF=1` logs guest vs handoff time per frame and Aurora begin/process/end times.
@@ -102,7 +105,13 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - Hardware GX has no vertex array sizes: the bridge sizes them from each draw's max index.
 - RenderWare calls display lists at unaligned addresses/sizes: the CP ignores the low 5 bits.
 - The game cancels and re-creates threads in the same OSThread struct: the scheduler retires the old record.
-- Windows timer resolution is raised to 1 ms at startup (retrace pacing).
+- Windows timer resolution is raised to 1 ms at startup (retrace pacing), and the process opts out of
+  power throttling: Windows 11 otherwise ignores the 1 ms request for a window that is not the visible
+  foreground one, and every sleep becomes 15.6 ms (20 fps, audio interrupts serviced late).
+- MusyX on GameCube runs its own DSP microcode, not AX (docs/AUDIO_RESEARCH.md). AxioDL/musyx (CC0) is
+  the reference for its command lists and PB semantics; its PC backend supplied the SRC filter design.
+- AI DMA: the next buffer is latched only after the game's AI interrupt handler ran (latching early
+  replayed the old 5 ms block = clicks at every frame boundary + robotic voices); the SDL queue holds ~40 ms.
 - RenderWare issues 0-vertex draws (GXBegin(strip, n=0)); Aurora underflows the primitive count (8 GB
   index buffer), so the bridge drops draws with too few vertices for their primitive.
 - Aurora reads vertex arrays/TLUTs when it processes the frame, after the game reused the memory:

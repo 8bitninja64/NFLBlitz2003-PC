@@ -242,29 +242,33 @@ static void mailToDsp(uint32_t mail) {
 }
 
 // --- AI DMA: plays the game's output buffers in real time ------------------------------
-// Each time a buffer starts, the AI DMA interrupt fires (the handler programs the next
-// one); the samples go to the host sink, whose queue paces the engine.
+// Each time a buffer starts, the AI DMA interrupt fires and its handler programs the next one.
+// The guest services interrupts late at times (e.g. while it waits for the renderer), so the
+// next buffer is latched only once that handler has run, as it always has on hardware;
+// latching early would replay the previous 5 ms block and drop the new one. The host queue is
+// kept deep enough (~40 ms) to ride out those waits.
 constexpr int kInterruptAiDma = 5;  // __OS_INTERRUPT_DSP_AI
 static std::atomic<bool> g_aiDmaRunning{false};
+static std::atomic<uint64_t> g_aiIrqDone{0};
 
 static void aiDmaThread() {
   using namespace std::chrono;
   std::vector<int16_t> host;
   auto next = steady_clock::now();
+  uint64_t posted = 0;
   for (;;) {
     if (!(g_dsp[0x36 / 2] & 0x8000) || g_paused.load()) {
       std::this_thread::sleep_for(milliseconds(1));
       next = steady_clock::now();
       continue;
     }
+    // Wait (bounded) for the handler of the previous block's interrupt.
+    auto deadline = steady_clock::now() + milliseconds(100);
+    while (g_aiIrqDone.load() < posted && steady_clock::now() < deadline && !g_paused.load())
+      std::this_thread::sleep_for(microseconds(200));
     uint32_t addr = ((uint32_t)g_dsp[0x30 / 2] << 16 | g_dsp[0x32 / 2]) & 0x01FFFFE0;
     uint32_t bytes = (g_dsp[0x36 / 2] & 0x7FFF) * 32;
     if (!bytes) bytes = 32;
-    sched::postIrq([](guest::Ctx& c) {
-      g_dsp[0x0A / 2] |= 0x08;  // AIDINT
-      uint32_t handler = sched::callGuest(c, kGetInterruptHandler, {kInterruptAiDma});
-      if (handler) sched::callGuest(c, handler, {kInterruptAiDma, 0});
-    });
     uint32_t frames = bytes / 4;
     host.resize(frames * 2);
     const uint8_t* src = guest::g_mem + addr;
@@ -273,11 +277,20 @@ static void aiDmaThread() {
       host[2 * i + 1] = (int16_t)(src[4 * i] << 8 | src[4 * i + 1]);
       host[2 * i] = (int16_t)(src[4 * i + 2] << 8 | src[4 * i + 3]);
     }
+    // The block has started: its interrupt lets the game prepare the next one.
+    posted++;
+    sched::postIrq([](guest::Ctx& c) {
+      g_dsp[0x0A / 2] |= 0x08;  // AIDINT
+      uint32_t handler = sched::callGuest(c, kGetInterruptHandler, {kInterruptAiDma});
+      if (handler) sched::callGuest(c, handler, {kInterruptAiDma, 0});
+      g_aiIrqDone.fetch_add(1);
+    });
     audioout::capture(host.data(), frames);
     const audioout::Sink* sink = audioout::sink();
     if (sink) {
-      // Keep ~3 buffers queued on the host device.
-      while (sink->queuedFrames() > frames * 3) std::this_thread::sleep_for(microseconds(500));
+      // Real-time pacing comes from the device draining the queue.
+      uint32_t target = sink->rate / 25;  // 40 ms
+      while (sink->queuedFrames() > target && !g_paused.load()) std::this_thread::sleep_for(microseconds(500));
       sink->submit(host.data(), frames);
     } else {
       next += nanoseconds((int64_t)frames * 1000000000ll / 32000);
