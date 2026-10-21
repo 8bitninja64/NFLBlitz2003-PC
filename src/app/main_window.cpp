@@ -249,6 +249,46 @@ static std::string pickDisc() {
 static void showError(const std::string& msg) {
   MessageBoxW(nullptr, widen(msg).c_str(), L"NFL Blitz 2003", MB_OK | MB_ICONERROR);
 }
+
+// First run: compile the game code from the player's disc with tools/make_module.ps1 (next to
+// the executable), in a console window that shows the progress.
+static bool buildModule(const std::string& dolPath, const std::string& outPath) {
+  wchar_t exe[MAX_PATH];
+  GetModuleFileNameW(nullptr, exe, MAX_PATH);
+  std::filesystem::path root = std::filesystem::path(exe).parent_path();
+  std::filesystem::path script = root / "tools" / "make_module.ps1";
+  if (!std::filesystem::exists(script)) {
+    showError("The game code has not been compiled yet, and the setup files (tools/make_module.ps1) are missing "
+              "next to NFLBlitz2003.exe.");
+    return false;
+  }
+  if (!getenv("BLITZ_AUTO_BUILD") &&
+      MessageBoxW(nullptr,
+                  L"NFL Blitz 2003 needs to compile the game code from your disc. This is done once and takes "
+                  L"about a minute.\n\nRequirements: Python 3 and Visual Studio 2022 (or its Build Tools) with the "
+                  L"C++ and Clang components.\n\nCompile now?",
+                  L"NFL Blitz 2003 - first start", MB_YESNO | MB_ICONINFORMATION) != IDYES)
+    return false;
+  std::filesystem::path work = std::filesystem::u8path(dolPath).parent_path();
+  std::wstring cmd = L"powershell -NoProfile -ExecutionPolicy Bypass -Command \"& '" + script.wstring() +
+                     L"' -Dol '" + widen(dolPath) + L"' -Out '" + widen(outPath) + L"' -Work '" + work.wstring() +
+                     L"'; $c = $LASTEXITCODE; if ($c) { Read-Host 'Compiling failed. Press Enter to close' }; exit $c\"";
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NEW_CONSOLE, nullptr,
+                      root.wstring().c_str(), &si, &pi)) {
+    showError("Cannot start PowerShell to compile the game code.");
+    return false;
+  }
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD code = 1;
+  GetExitCodeProcess(pi.hProcess, &code);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  if (code != 0) showError("Compiling the game code failed (see the console output).");
+  return code == 0;
+}
 #endif
 
 int main(int argc, char** argv) {
@@ -259,7 +299,9 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
   boot.pickDisc = pickDisc;
   boot.showError = showError;
+  boot.buildModule = buildModule;
 #endif
+  boot.userDir = userDataDir();
   if (!guest::bootFromArgs(argc, argv, &boot)) return 1;
   if (!getenv("BLITZ_DISC")) {
     std::error_code ec;

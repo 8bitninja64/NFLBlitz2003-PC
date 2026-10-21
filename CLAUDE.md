@@ -48,6 +48,12 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   memory, MMIO, CPU helpers, HLE table; GameModule out: function table, entry, HLE names, DOL hash);
   module_rt.cpp is the DLL side, module_loader.cpp the runtime side (BLITZ_MODULE=<path> overrides).
   HLE(name) self-registers; the loader resolves the module's HLE names and checks the DOL hash.
+- First start / distribution: `tools/make_module.ps1 [-Disc iso | -Dol main.dol] [-Out dll]` builds only the
+  module (Python 3 + clang-cl/lld-link/ninja from VS 2022; ~1 min). When no module matching the disc is
+  found (next to the exe, then %APPDATA%/NFL Blitz 2003/blitz_game.dll), the window app writes the disc's
+  DOL to %APPDATA%/NFL Blitz 2003/module_build, asks, and runs the script in a console
+  (BLITZ_AUTO_BUILD=1 skips the question). `tools/package.ps1` makes dist/NFLBlitz2003 with the runtime,
+  recompiler, config and module headers but no game code.
 - `src/app/main_window.cpp` (NFLBlitz2003.exe: Aurora window, audio, pads, hotkeys, disc picker, texture
   packs), `overlay.cpp` (F1 ImGui settings menu, FPS counter), `main_headless.cpp` (blitz_headless.exe).
 - `src/runtime/settings.*`: settings.ini in %APPDATA%/NFL Blitz 2003 (BLITZ_SET="k=v;k=v" overrides).
@@ -84,7 +90,7 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - `BLITZ_MENU_AT=<s>` opens the F1 menu after N seconds, `BLITZ_MENU_TAB=Controls` picks its tab (screenshots).
 - `BLITZ_GX_RING=<n>` keeps the last n translated frames; creating build/gxdump.trigger writes them to
   build/ring and dumps the next frame's textures + TLUTs. `tools/brightscan.py` uses it to catch the
-  glare. Runs are not deterministic (same input script, different draw counts at the same frame),
+  glare (it appears ~93 s into the soak script in roughly one run of three). Runs are not deterministic (same input script, different draw counts at the same frame),
   so match dumps to screenshots within one run. `tools/gxdraws.py` groups draws by blend/z/texture.
 - `-DBLITZ_AURORA_CHECKS=ON` builds Aurora GX with its debug validation (FATALs on odd-but-legal state).
 - Aurora persists pipelines in %APPDATA%/NFL Blitz 2003/pipeline_cache.db: a bad pipeline from an
@@ -99,6 +105,12 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - Windows timer resolution is raised to 1 ms at startup (retrace pacing).
 - RenderWare issues 0-vertex draws (GXBegin(strip, n=0)); Aurora underflows the primitive count (8 GB
   index buffer), so the bridge drops draws with too few vertices for their primitive.
+- Aurora reads vertex arrays/TLUTs when it processes the frame, after the game reused the memory:
+  the bridge snapshots arrays per draw (memcmp against the last copy) and TLUTs at load time into a
+  per-frame arena (BLITZ_GX_HAZARD=1 reports guest memory changing between uses). Textures are still
+  read in place (rarely changed mid-frame).
+- Widescreen with centered 2D: the game's full-screen orthographic "clear" quad (draw 0, writes alpha 0)
+  only covers the 4:3 middle, so EFB alpha outside it keeps the copy-clear value.
 - Discs are read through nod (aurora::dvd's dependency): ISO, RVZ, WIA, CISO, GCZ, NFS.
 - Don't write C/C++ with escapes through bash heredocs/python-in-bash; use the Write/Edit tools.
 

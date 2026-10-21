@@ -23,6 +23,9 @@ uint32_t g_entryPoint = 0;
 
 static const GameModule* g_module = nullptr;
 static std::vector<Fn> g_hleTable;
+#ifdef _WIN32
+static HMODULE g_lib = nullptr;
+#endif
 
 static RuntimeApi makeApi() {
   RuntimeApi api{};
@@ -73,6 +76,9 @@ bool loadGameModule(const std::string& path, std::string* error) {
 #endif
   if (!init) {
     *error = "'" + path + "' is not a game module";
+#ifdef _WIN32
+    FreeLibrary(lib);
+#endif
     return false;
   }
   // The HLE table is filled after init (the module tells us which functions it needs);
@@ -81,19 +87,23 @@ bool loadGameModule(const std::string& path, std::string* error) {
   static RuntimeApi api = makeApi();
   api.hle = g_hleTable.data();
   const GameModule* mod = init(&api);
-  if (!mod) {
-    *error = "the game module was built for a different runtime version; rebuild it";
+  auto reject = [&](const std::string& msg) {
+    *error = msg;
+#ifdef _WIN32
+    FreeLibrary(lib);
+#endif
     return false;
-  }
+  };
+  if (!mod) return reject("the game module was built for a different runtime version; rebuild it");
   std::string missing;
   for (uint32_t i = 0; i < mod->hleCount && i < g_hleTable.size(); i++) {
     g_hleTable[i] = hle::find(mod->hleNames[i]);
     if (!g_hleTable[i]) missing += std::string(missing.empty() ? "" : ", ") + mod->hleNames[i];
   }
-  if (!missing.empty()) {
-    *error = "the runtime lacks host functions the game module needs: " + missing;
-    return false;
-  }
+  if (!missing.empty()) return reject("the runtime lacks host functions the game module needs: " + missing);
+#ifdef _WIN32
+  g_lib = lib;
+#endif
   g_module = mod;
   g_funcTable = mod->table;
   g_funcTableSize = mod->tableSize;
@@ -102,6 +112,19 @@ bool loadGameModule(const std::string& path, std::string* error) {
   LOG_INFO("game module %s: %u functions, %u host functions, built from DOL %s", path.c_str(), mod->tableSize,
            mod->hleCount, mod->dolHash);
   return true;
+}
+
+void unloadGameModule() {
+  if (!g_module) return;
+  setTraceRingSource(nullptr);
+  g_module = nullptr;
+  g_funcTable = nullptr;
+  g_funcTableSize = 0;
+  g_entryPoint = 0;
+#ifdef _WIN32
+  FreeLibrary(g_lib);
+  g_lib = nullptr;
+#endif
 }
 
 const char* moduleDolHash() { return g_module ? g_module->dolHash : ""; }

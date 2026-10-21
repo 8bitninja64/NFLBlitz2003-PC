@@ -44,9 +44,11 @@ disc being played.
 Run `build/windows-clang/NFLBlitz2003.exe`. On first start it looks for the disc next to the
 executable or in the working directory, otherwise it asks for it; the path is remembered.
 
-**Do not redistribute `blitz_game.dll`** (or a build folder containing it): it contains code translated from the game. A
-redistributable setup (shipping the recompiler and compiling on the user's machine from their disc,
-as the Luigi's Mansion PC port does) is planned.
+`tools/package.ps1` assembles `dist/NFLBlitz2003` without any game code: on its first start the
+game asks for the disc and compiles `blitz_game.dll` from it (needs Python 3 and Visual Studio 2022
+or its Build Tools with C++ and Clang; about a minute).
+
+**Do not redistribute `blitz_game.dll`** (or a build folder containing it): it contains code translated from the game.
 
 ## Controls (keyboard, player 1)
 

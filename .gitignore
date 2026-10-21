@@ -4,3 +4,4 @@ build/
 *.rvz
 __pycache__/
 USA/
+dist/

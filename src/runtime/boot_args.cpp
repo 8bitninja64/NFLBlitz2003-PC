@@ -16,6 +16,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -92,24 +94,51 @@ bool bootFromArgs(int argc, char** argv, BootOptions* opts) {
     if (opts && opts->showError) opts->showError(msg);
     return false;
   };
-  std::string modulePath = opts && !opts->modulePath.empty() ? opts->modulePath : defaultModulePath();
+  uint8_t hdr[0x100];
+  if (!g_disc.read(g_disc.dolOffset(), hdr, sizeof(hdr))) return fail("cannot read the executable from the disc");
+  uint32_t dolSize = 0;
+  for (int i = 0; i < 18; i++) {
+    auto be = [&](int o) { return (uint32_t)hdr[o] << 24 | hdr[o + 1] << 16 | hdr[o + 2] << 8 | hdr[o + 3]; };
+    uint32_t end = be(i * 4) + be(0x90 + i * 4);
+    if (be(0x90 + i * 4) && end > dolSize) dolSize = end;
+  }
+  std::vector<uint8_t> dol(dolSize);
+  if (!g_disc.read(g_disc.dolOffset(), dol.data(), dolSize)) return fail("cannot read the executable from the disc");
+  const std::string hash = dolHash(dol.data(), dol.size());
+
+  // Modules: the given/default path, then one built earlier into the user directory. The first
+  // that loads and was recompiled from this disc's executable wins.
   std::string error;
-  if (!loadGameModule(modulePath, &error)) return fail(error);
-  {
-    uint8_t hdr[0x100];
-    if (!g_disc.read(g_disc.dolOffset(), hdr, sizeof(hdr))) return fail("cannot read the executable from the disc");
-    uint32_t dolSize = 0;
-    for (int i = 0; i < 18; i++) {
-      auto be = [&](int o) { return (uint32_t)hdr[o] << 24 | hdr[o + 1] << 16 | hdr[o + 2] << 8 | hdr[o + 3]; };
-      uint32_t end = be(i * 4) + be(0x90 + i * 4);
-      if (be(0x90 + i * 4) && end > dolSize) dolSize = end;
+  auto tryLoad = [&](const std::string& path) {
+    if (!fileExists(path)) return false;
+    std::string err;
+    if (!loadGameModule(path, &err)) {
+      error = err;
+      return false;
     }
-    std::vector<uint8_t> dol(dolSize);
-    if (!g_disc.read(g_disc.dolOffset(), dol.data(), dolSize)) return fail("cannot read the executable from the disc");
-    std::string hash = dolHash(dol.data(), dol.size());
-    if (hash != moduleDolHash())
-      return fail("The game module was built from a different executable (" + std::string(moduleDolHash()) +
-                  ", this disc has " + hash + "). Rebuild it from this disc.");
+    if (hash == moduleDolHash()) return true;
+    error = "The game module " + path + " was built from a different executable (" + moduleDolHash() +
+            ", this disc has " + hash + ").";
+    unloadGameModule();
+    return false;
+  };
+  std::string primary = opts && !opts->modulePath.empty() ? opts->modulePath : defaultModulePath();
+  std::string built = opts && !opts->userDir.empty() ? opts->userDir + "/blitz_game.dll" : std::string();
+  bool loaded = tryLoad(primary) || (!built.empty() && tryLoad(built));
+  if (!loaded && opts && opts->buildModule && !built.empty()) {
+    std::string dolPath = opts->userDir + "/module_build/main.dol";
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::u8path(opts->userDir + "/module_build"), ec);
+    std::ofstream out(std::filesystem::u8path(dolPath), std::ios::binary);
+    out.write(reinterpret_cast<const char*>(dol.data()), (std::streamsize)dol.size());
+    out.close();
+    if (!out) return fail("cannot write " + dolPath);
+    if (!opts->buildModule(dolPath, built)) return false;  // it reported why
+    loaded = tryLoad(built);
+  }
+  if (!loaded) {
+    if (error.empty()) error = "The game module (" + primary + ") is missing. Build it from your disc with tools/make_module.ps1.";
+    return fail(error);
   }
 
   if (!loadDol() || !setupLowMemory()) return fail("failed to load the executable from the disc");

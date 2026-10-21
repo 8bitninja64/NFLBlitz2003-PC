@@ -1,4 +1,6 @@
-"""GameCube disc image reader: header, FST listing, file and DOL extraction."""
+"""GameCube disc image reader: header, FST listing, file and DOL extraction.
+
+Usage: python -I gcdisc.py <iso> [<outdir> [--dol-only]]   (no outdir: list files)"""
 import struct, sys, os
 
 class Disc:
@@ -45,7 +47,10 @@ class Disc:
 if __name__ == '__main__':
     d = Disc(sys.argv[1])
     print(d.game_id, d.title, hex(d.dol_off))
-    if len(sys.argv) > 2:
+    if len(sys.argv) > 3 and sys.argv[3] == '--dol-only':
+        os.makedirs(sys.argv[2], exist_ok=True)
+        open(os.path.join(sys.argv[2], 'main.dol'), 'wb').write(d.dol())
+    elif len(sys.argv) > 2:
         out = sys.argv[2]
         os.makedirs(out, exist_ok=True)
         open(os.path.join(out, 'main.dol'), 'wb').write(d.dol())
