@@ -73,5 +73,5 @@ F1: settings menu · Alt+Enter or F11: fullscreen
 
 ## Status
 
-Boots, menus and Quickplay games are playable with sound; the memory card is detected and read (writing a save is not yet verified).
+Boots, menus and Quickplay games are playable with sound at 60 fps; the memory card is detected and read (writing a save is not yet verified).
 Known issues and development notes: see `CLAUDE.md`.

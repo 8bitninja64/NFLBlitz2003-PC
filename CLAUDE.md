@@ -131,5 +131,8 @@ RenderWare 801D13C8..80227364.
   polyphase SRC filter (cubic instead), ITD/HRTF, low-pass filter, compressor; the title is silent.
 - Memory card: detection, mount/check, directory and open work; writing a save not yet exercised.
 - Code split: blitz_game.dll (recompiled game) + runtime exe; F1 Controls tab rebinds keyboard keys.
-- Open: bright white glare during the stadium intro / some plays (additive and dst-alpha blending:
-  compare with real hardware footage); RVZ discs; redistributable first-run compile setup.
+- Glare (white field at the snap): the stadium-shadow pass (blend 0x2FD: dst*0.62 + dst*(1-dstA))
+  brightened where the field's alpha was wrong because Aurora read reused vertex/palette memory late.
+  Fixed by the bridge's snapshots: 0 glare frames in 6 scan runs (was ~1 in 3).
+- First-run compile verified from a tools/package.ps1 folder (44 s, then cached in %APPDATA%).
+- Open: card writes untested; memory growth over long sessions; RVZ discs untested.
