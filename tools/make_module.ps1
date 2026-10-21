@@ -18,19 +18,23 @@ if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue) -or -not (Get-Comm
 
 # Python 3: the py launcher or python on PATH (not the Microsoft Store stub).
 $py = @()
-if (Get-Command py -ErrorAction SilentlyContinue) { $py = @("py", "-3") }
-elseif (Get-Command python -ErrorAction SilentlyContinue) { $py = @("python") }
+$cmd = Get-Command py.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($cmd) { $py = @($cmd.Source, "-3") }
+else {
+  $cmd = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($cmd) { $py = @($cmd.Source) }
+}
 if ($py.Count) { & $py[0] $py[1..9] -c "import sys; sys.exit(sys.version_info < (3, 8))" 2>$null; if ($LASTEXITCODE) { $py = @() } }
 if (-not $py.Count) { Write-Error "Python 3.8 or newer is required (python.org)."; exit 1 }
-function Py { & $py[0] $py[1..9] -I @args }
+function Invoke-Python { & $py[0] $py[1..9] -I @args }
 
 New-Item -ItemType Directory -Force "$Work/gen" | Out-Null
 if (-not $Dol) {
-  Py tools/gcdisc.py $Disc $Work --dol-only; if ($LASTEXITCODE) { exit 1 }
+  Invoke-Python tools/gcdisc.py $Disc $Work --dol-only; if ($LASTEXITCODE) { exit 1 }
   $Dol = "$Work/main.dol"
 }
-Py tools/recomp/analyze.py $Dol "$Work/functions.json"; if ($LASTEXITCODE) { exit 1 }
-Py tools/recomp/recomp.py $Dol "$Work/functions.json" config/sdk_symbols.txt,config/symbols.txt config/hooks.txt "$Work/gen"
+Invoke-Python tools/recomp/analyze.py $Dol "$Work/functions.json"; if ($LASTEXITCODE) { exit 1 }
+Invoke-Python tools/recomp/recomp.py $Dol "$Work/functions.json" "config/sdk_symbols.txt,config/symbols.txt" config/hooks.txt "$Work/gen"
 if ($LASTEXITCODE) { exit 1 }
 
 # A small ninja file: parallel and incremental (unchanged chunks are not recompiled).
