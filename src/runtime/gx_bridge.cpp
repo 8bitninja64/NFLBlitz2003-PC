@@ -18,6 +18,7 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -30,6 +31,41 @@ uint32_t be32(const uint8_t* p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2
 uint32_t field(uint32_t v, int bits, int shift) { return (v >> shift) & ((1u << bits) - 1); }
 
 uint8_t* hostPhys(uint32_t phys) { return guest::g_mem + (phys & guest::kMemMask); }
+
+// Copies of guest memory for the frame being built. Aurora reads vertex arrays and TLUTs when it
+// processes the frame, after the game may have reused that memory (it does: skinned vertices
+// and palettes change between draws), while the hardware reads them when the GP executes the
+// command. Blocks stay valid until Aurora has consumed the frame.
+class Arena {
+public:
+  uint8_t* copy(const uint8_t* src, size_t size) {
+    size_t aligned = (size + 31) & ~size_t(31);
+    if (m_block >= m_blocks.size() || m_used + aligned > m_blocks[m_block].size) {
+      if (m_block < m_blocks.size()) m_block++;
+      while (m_block < m_blocks.size() && m_blocks[m_block].size < aligned) m_block++;
+      if (m_block >= m_blocks.size()) {
+        size_t n = aligned > kBlock ? aligned : kBlock;
+        m_blocks.push_back({std::make_unique<uint8_t[]>(n), n});
+        m_block = m_blocks.size() - 1;
+      }
+      m_used = 0;
+    }
+    uint8_t* p = m_blocks[m_block].data.get() + m_used;
+    memcpy(p, src, size);
+    m_used += aligned;
+    return p;
+  }
+  void reset() { m_block = 0, m_used = 0; }
+
+private:
+  static constexpr size_t kBlock = 8 << 20;
+  struct Block {
+    std::unique_ptr<uint8_t[]> data;
+    size_t size;
+  };
+  std::vector<Block> m_blocks;
+  size_t m_block = 0, m_used = 0;
+};
 
 class Bridge final : public gxfifo::Sink {
 public:
@@ -77,9 +113,10 @@ private:
   // Vertex arrays (CP array numbering: 0 POS, 1 NRM, 2-3 CLR, 4-11 TEX, 12-15 XF arrays).
   struct Array {
     uint32_t base = 0, stride = 0;
-    uint64_t emittedPtr = 0;
-    uint32_t emittedSize = 0;
+    uint32_t emittedBase = 0, emittedSize = 0;  // the snapshot Aurora was last given
+    const uint8_t* snapshot = nullptr;
   } m_arrays[16];
+  Arena m_arena;
   void ensureArray(int i, uint32_t needed);
 
   // Texture maps.
@@ -93,9 +130,15 @@ private:
   uint32_t m_tlutSrc = 0;  // BP 0x64
   struct TlutLoad {
     uint32_t phys = 0, entries = 0;
+    std::vector<uint8_t> tmem;  // copied at load time, as the hardware does (TMEM keeps it)
+    uint32_t version = 0;
   };
   std::unordered_map<uint32_t, TlutLoad> m_tlutLoads;
   uint32_t m_tlutSlotOffset[20];
+  struct TlutCopy {  // this frame's arena copy per Aurora slot (one pointer while unchanged)
+    const uint8_t* data = nullptr;
+    uint32_t tmem = 0, version = 0;
+  } m_tlutCopies[20];
   int m_tlutSlotNext = 0;
   int tlutSlot(uint32_t tmemOffset);
 
@@ -108,6 +151,14 @@ private:
   uint32_t m_bp41 = 0, m_bpF3 = 0, m_bp42 = 0, m_bp43 = 0;
   std::unordered_map<uint64_t, uint32_t> m_blendHist;
   std::deque<std::pair<uint32_t, std::vector<uint8_t>>> m_ring;  // BLITZ_GX_RING
+  // BLITZ_GX_HAZARD: memory a draw referenced that changed before Aurora reads it.
+  struct Use {
+    uint64_t hash;
+    int kind;
+  };
+  std::unordered_map<uint64_t, Use> m_uses;  // (host offset << 24 | size) -> last hash
+  uint32_t m_hazardMid[18] = {}, m_hazardLate[18] = {};
+  void noteUse(int kind, uint32_t phys, uint32_t size);
 
   // Per-frame content hashes (texture/TLUT versions).
   std::unordered_map<uint64_t, uint32_t> m_hashes;
@@ -135,28 +186,48 @@ int Bridge::tlutSlot(uint32_t tmemOffset) {
   return slot;
 }
 
+// kind: 0-11 vertex arrays, 12-15 indexed XF arrays, 16 texture, 17 TLUT.
+void Bridge::noteUse(int kind, uint32_t phys, uint32_t size) {
+  phys &= guest::kMemMask;
+  if (phys >= guest::kMem1Size || size == 0) return;
+  if (phys + size > guest::kMem1Size) size = guest::kMem1Size - phys;
+  uint64_t key = (uint64_t)phys << 24 | (size & 0xFFFFFF);
+  uint64_t h = XXH3_64bits(hostPhys(phys), size);
+  auto [it, inserted] = m_uses.try_emplace(key, Use{h, kind});
+  if (!inserted && it->second.hash != h) {
+    m_hazardMid[kind]++;
+    it->second.hash = h;
+  }
+}
+
 void Bridge::ensureArray(int i, uint32_t needed) {
   Array& a = m_arrays[i];
-  uint64_t ptr = (uint64_t)(uintptr_t)hostPhys(a.base);
-  if (ptr == a.emittedPtr && needed <= a.emittedSize) return;
+  uint32_t phys = a.base & guest::kMemMask;
+  uint32_t limit = phys < guest::kMem1Size ? guest::kMem1Size - phys : 0;
+  if (needed > limit) needed = limit;
+  // Reuse the last snapshot while it covers the range and the game has not changed the data.
+  if (a.snapshot && a.emittedBase == a.base && needed <= a.emittedSize &&
+      memcmp(a.snapshot, hostPhys(phys), needed) == 0)
+    return;
   if (needed > 0x01000000) LOG_ERROR("GX: vertex array %d needs %u bytes (base %08X stride %u)", i, needed, a.base, a.stride);
   uint32_t size = (needed + 255) & ~255u;
-  if (ptr == a.emittedPtr && size < a.emittedSize) size = a.emittedSize;
-  uint32_t limit = guest::kMem1Size - (a.base & guest::kMemMask);
+  if (a.emittedBase == a.base && size < a.emittedSize) size = a.emittedSize;
   if (size > limit) size = limit;
   m_arrayBytes += size;
   m_arrayLoads++;
+  a.snapshot = m_arena.copy(hostPhys(phys), size);
+  a.emittedBase = a.base;
+  a.emittedSize = size;
   aurora(GX_AURORA_LOAD_ARRAYBASE + i);
-  put64(ptr);
+  put64((uint64_t)(uintptr_t)a.snapshot);
   put32(size);
   put8(0);  // big-endian data
-  a.emittedPtr = ptr;
-  a.emittedSize = size;
 }
 
 void Bridge::flushTextures() {
   static const bool noTex = getenv("BLITZ_GX_NOTEX") != nullptr;  // debugging
   if (noTex) return;
+  static const bool hazard = getenv("BLITZ_GX_HAZARD") != nullptr;
   for (int id = 0; id < 8; id++) {
     TexMap& t = m_tex[id];
     if (!t.dirty) continue;
@@ -176,16 +247,20 @@ void Bridge::flushTextures() {
       if (it != m_tlutLoads.end()) {
         aurora(GX_AURORA_LOAD_TLUT);
         put8(slot);
-        put64((uint64_t)(uintptr_t)hostPhys(it->second.phys));
+        TlutCopy& copy = m_tlutCopies[slot];
+        if (!copy.data || copy.tmem != tmem || copy.version != it->second.version)
+          copy = {m_arena.copy(it->second.tmem.data(), it->second.tmem.size()), tmem, it->second.version};
+        put64((uint64_t)(uintptr_t)copy.data);
         put32(tlutFmt);
         put16(it->second.entries);
         put32(it->second.phys | 0x80000000u);
-        put32(contentVersion(it->second.phys, it->second.entries * 2));
+        put32(it->second.version);
+        if (hazard) noteUse(17, it->second.phys, it->second.entries * 2);
         if (m_dumpTextures) {
           char name[96];
           snprintf(name, sizeof(name), "build/tlut_%08X_%u_f%u.bin", it->second.phys, it->second.entries, tlutFmt);
           if (FILE* f = fopen(name, "wb")) {
-            fwrite(hostPhys(it->second.phys), 1, it->second.entries * 2, f);
+            fwrite(it->second.tmem.data(), 1, it->second.tmem.size(), f);
             fclose(f);
           }
         }
@@ -210,6 +285,7 @@ void Bridge::flushTextures() {
     put8(mips ? 1 : 0);
     put32((uint32_t)XXH3_64bits_withSeed(&phys, 4, (uint64_t)width << 32 | height << 4 | format));
     put32(contentVersion(phys, bytes));
+    if (hazard) noteUse(16, phys, bytes);
   }
 }
 
@@ -235,7 +311,14 @@ void Bridge::bp(uint32_t v, const uint8_t* raw) {
   case 0x64: m_tlutSrc = v; return;  // TLUT load source (Aurora gets LOAD_TLUT instead)
   case 0x65: {
     uint32_t tmem = field(v, 10, 0);
-    m_tlutLoads[tmem] = {field(m_tlutSrc, 21, 0) << 5, field(v, 11, 10) * 16};
+    uint32_t phys = (field(m_tlutSrc, 21, 0) << 5) & guest::kMemMask;
+    uint32_t entries = field(v, 11, 10) * 16;
+    if (phys + entries * 2 > guest::kMem1Size) entries = (guest::kMem1Size - phys) / 2;
+    TlutLoad& load = m_tlutLoads[tmem];
+    load.phys = phys;
+    load.entries = entries;
+    load.tmem.assign(hostPhys(phys), hostPhys(phys) + entries * 2);
+    load.version = (uint32_t)XXH3_64bits(load.tmem.data(), load.tmem.size()) | 1;
     for (TexMap& t : m_tex) t.dirty = true;
     return;
   }
@@ -318,12 +401,16 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
     static const uint8_t kMin[8] = {4, 4, 3, 3, 3, 2, 2, 1};
     if (n < kMin[prim]) return;
   }
+  // BLITZ_GX_SKIPBLEND=<hex>: drop draws whose blend mode (BP 0x41 low 16 bits) matches (debugging).
+  static const long skipBlend = getenv("BLITZ_GX_SKIPBLEND") ? strtol(getenv("BLITZ_GX_SKIPBLEND"), nullptr, 16) : -1;
+  if (skipBlend >= 0 && (long)(m_bp41 & 0xFFFF) == skipBlend) return;
   flushTextures();
   // BLITZ_BLEND_LOG: per-frame histogram of (blend mode BP 0x41, alpha compare BP 0xF3, pixel format BP 0x43).
   static const bool blendLog = getenv("BLITZ_BLEND_LOG") != nullptr;
   if (blendLog) m_blendHist[(uint64_t)(m_bp41 & 0xFFFF) << 32 | (m_bpF3 & 0xFFFFFF)]++;
   uint32_t vat = p[0] & 7;
   uint32_t count = (uint32_t)p[1] << 8 | p[2];
+  static const bool hazard = getenv("BLITZ_GX_HAZARD") != nullptr;
   gxfifo::Attr attrs[gxfifo::kNumAttrs];
   gxfifo::vertexLayout(vat, attrs);
   uint32_t maxIndex[12] = {};
@@ -353,6 +440,7 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
       uint32_t stride = m_arrays[arr].stride;
       uint32_t elem = stride ? stride : 4;
       ensureArray(arr, maxIndex[arr] * stride + elem);
+      if (hazard) noteUse(arr, m_arrays[arr].base, maxIndex[arr] * stride + elem);
     }
   }
   putRaw(p, size);
@@ -363,6 +451,8 @@ void Bridge::indexedXf(const uint8_t* p) {
   uint32_t index = (uint32_t)p[1] << 8 | p[2];
   uint32_t len = (p[3] >> 4) + 1;
   ensureArray(arr, index * m_arrays[arr].stride + len * 4);
+  static const bool hazard = getenv("BLITZ_GX_HAZARD") != nullptr;
+  if (hazard) noteUse(arr, m_arrays[arr].base + index * m_arrays[arr].stride, len * 4);
   putRaw(p, 5);
 }
 
@@ -502,6 +592,16 @@ void Bridge::endFrame() {
       ringTriggered = true;
     }
   }
+  if (!m_uses.empty()) {
+    for (auto& [key, use] : m_uses)
+      if (XXH3_64bits(hostPhys((uint32_t)(key >> 24)), (size_t)(key & 0xFFFFFF)) != use.hash) m_hazardLate[use.kind]++;
+    m_uses.clear();
+    std::string line;
+    for (int k = 0; k < 18; k++)
+      if (m_hazardMid[k] || m_hazardLate[k]) line += " " + std::to_string(k) + ":" + std::to_string(m_hazardMid[k]) + "/" + std::to_string(m_hazardLate[k]);
+    if (!line.empty()) LOG_INFO("GX hazards frame %u (kind:changed between uses/after last use):%s", frameNo, line.c_str());
+    for (int k = 0; k < 18; k++) m_hazardMid[k] = m_hazardLate[k] = 0;
+  }
   if (!m_blendHist.empty()) {
     std::string line;
     for (auto& [k, n] : m_blendHist) {
@@ -541,7 +641,10 @@ void Bridge::endFrame() {
     put8(1);
   }
   // Aurora starts each frame with fresh caches.
-  for (Array& a : m_arrays) a.emittedPtr = 0, a.emittedSize = 0;
+  // Aurora has consumed the frame: its snapshots can be reused.
+  m_arena.reset();
+  for (TlutCopy& c : m_tlutCopies) c.data = nullptr;
+  for (Array& a : m_arrays) a.snapshot = nullptr, a.emittedSize = 0;
   for (TexMap& t : m_tex) t.dirty = true;
 }
 
