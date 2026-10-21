@@ -9,6 +9,7 @@ void logf(LogLevel level, const char* fmt, ...);
 void setLogLevel(LogLevel level);
 bool logEnabled(LogLevel level);
 void dumpCallTrace();                    // this host thread's recent guest functions
+uint32_t currentGuestFunction();         // the guest function entered last on this host thread
 void dumpAllTraces();
 void registerTraceRing(const char* name);  // call on each host thread that runs guest code
 namespace guest {

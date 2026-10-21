@@ -11,6 +11,7 @@
 #include "ctx.h"
 
 #include <functional>
+#include <string>
 
 namespace sched {
 
@@ -47,6 +48,9 @@ void setPriority(Thread* t, int priority);
 
 // Host waits that block on "hardware" release the guest CPU meanwhile.
 void dumpGuestStacks();  // diagnostics: back-chain walk of every guest thread
+// Diagnostics: lr and back-chain return addresses of the calling guest thread's own context (inside
+// callGuest, e.g. an interrupt handler, that is the interrupted code's stack).
+std::string currentBacktrace();
 
 void releaseCpu(guest::Ctx& c);
 void reacquireCpu(guest::Ctx& c);

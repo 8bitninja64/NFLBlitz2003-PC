@@ -27,6 +27,7 @@ set(BLITZ_RUNTIME_SOURCES
   src/runtime/hle_card.cpp
   src/runtime/hle_registry.cpp
   src/runtime/hle_dvd.cpp
+  src/runtime/hle_models.cpp
   src/runtime/hle_movie.cpp
   src/runtime/hle_os.cpp
   src/runtime/hle_pad.cpp

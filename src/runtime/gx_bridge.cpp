@@ -4,6 +4,7 @@
 #include "hw.h"
 #include "log.h"
 #include "memory.h"
+#include "sched.h"
 #include "settings.h"
 
 #include <dolphin/gx/GXAurora.h>
@@ -620,13 +621,31 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
     put8(0x61);
     put32(0x41000000u | m_bp41);
   }
-  // BLITZ_GX_PAINT=<draw index>[,...]: draw these draws (per frame) solid white, opaque (debugging).
+  // BLITZ_GX_DRAWSTACK=<vertex count>[,...]: log the guest call stack of draws with these vertex counts
+  // (the parser runs inside the game's FIFO writes, so it is the code that issued the draw).
+  static const char* drawStack = getenv("BLITZ_GX_DRAWSTACK");
+  if (drawStack) {
+    static int logged = 0;
+    char keyN[16];
+    snprintf(keyN, sizeof(keyN), ",%u,", count);
+    if (logged < 60 && (std::string(",") + drawStack + ",").find(keyN) != std::string::npos) {
+      logged++;
+      LOG_INFO("GX draw of %u verts: %s", count, sched::currentBacktrace().c_str());
+    }
+  }
+  // BLITZ_GX_PAINT=<draw index>|n<vertex count>[,...]: draw these draws (per frame) solid white, opaque
+  // (debugging; draw order varies from run to run, vertex counts do not).
   static const char* paint = getenv("BLITZ_GX_PAINT");
   uint32_t drawIndex = m_drawInFrame++;
   if (paint) {
-    char key[16];
+    char key[16], keyN[16];
     snprintf(key, sizeof(key), ",%u,", drawIndex);
-    if ((std::string(",") + paint + ",").find(key) != std::string::npos) {
+    snprintf(keyN, sizeof(keyN), ",n%u,", count);
+    char keyS[16];
+    snprintf(keyS, sizeof(keyS), ",s%u,", field(m_genMode, 4, 10) + 1);  // s<TEV stages>
+    std::string list = std::string(",") + paint + ",";
+    if (list.find(key) != std::string::npos || list.find(keyN) != std::string::npos ||
+        list.find(keyS) != std::string::npos) {
       auto bpw = [&](uint32_t val) {
         put8(0x61);
         put32(val);
@@ -643,9 +662,11 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
       return;
     }
   }
-  // BLITZ_GX_DRAWBP=<draw index>:<reg>=<value>[;<reg>=<value>...]: BP overrides for one draw (debugging).
+  // BLITZ_GX_DRAWBP=<draw index>|s<TEV stages>:<reg>=<value>[;<reg>=<value>...]: BP overrides for one draw,
+  // or for every draw with that many TEV stages (debugging).
   static const char* drawBp = getenv("BLITZ_GX_DRAWBP");
-  if (drawBp && (uint32_t)atoi(drawBp) == drawIndex) {
+  if (drawBp && (drawBp[0] == 's' ? (uint32_t)atoi(drawBp + 1) == field(m_genMode, 4, 10) + 1
+                                  : (uint32_t)atoi(drawBp) == drawIndex)) {
     std::vector<uint32_t> regs;
     for (const char* q = strchr(drawBp, ':'); q && *q; q = strchr(q, ';')) {
       q++;
@@ -874,6 +895,12 @@ void Bridge::endFrame() {
       fwrite(m_out.data(), 1, m_out.size(), f);
       fclose(f);
       LOG_INFO("wrote %s (%zu bytes)", name, m_out.size());
+    }
+    // ...and guest MEM1 at the end of the frame (offline geometry checks).
+    snprintf(name, sizeof(name), "build/gxmem_%u.bin", frameNo);
+    if (FILE* f = fopen(name, "wb")) {
+      fwrite(hostPhys(0), 1, guest::kMem1Size, f);
+      fclose(f);
     }
   }
   // BLITZ_GX_RING=<n>: keep the last n streams; creating build/gxdump.trigger writes them out

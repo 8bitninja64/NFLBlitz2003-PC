@@ -117,12 +117,22 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   experiment is replayed at every start, so delete it when debugging shader/state crashes.
 
 ## Gotchas
-- Aurora's pipeline_cache.db / dawn_cache.db are not invalidated when its shader generator changes: a
-  stale cache gave team-select players missing helmets and a hole above the jersey number. The app
-  clears both when the executable changes (shader_cache.stamp). When a GX experiment looks wrong for no
+- Aurora's pipeline_cache.db / dawn_cache.db are not invalidated when its shader generator changes; the
+  app clears both when the executable changes (shader_cache.stamp). When a GX experiment looks wrong for no
   reason, re-encode the state under another cache key (e.g. an unused swap field) to test for this.
-- Per-draw debugging: `BLITZ_GX_PAINT=<n>` (draw n of each frame white/opaque), `BLITZ_GX_DRAWBP=<n>:<reg>=<v>;...`
-  (BP overrides for one draw), `BLITZ_PEEKZ=x,y;...` (EFB depth at the BLITZ_SHOT frame).
+- Per-draw debugging: `BLITZ_GX_PAINT=<n>|n<verts>|s<stages>,...` (those draws white/opaque; draw order
+  varies between runs, vertex counts don't), `BLITZ_GX_DRAWBP=<n>|s<stages>:<reg>=<v>;...` (BP overrides),
+  `BLITZ_PEEKZ=x,y;...` (EFB depth at the BLITZ_SHOT frame), `BLITZ_GX_DRAWSTACK=<verts>,...` (guest call
+  stack of those draws: the parser runs inside the game's FIFO writes). BLITZ_GX_DUMP=N also writes guest
+  MEM1 at the end of that frame (build/gxmem_N.bin) for offline geometry checks.
+- `tools/shot.ps1 -Frame N -Out x.png [-Env "NAME=v|NAME=v"]` runs the soak script to frame N and saves the
+  shot. `BLITZ_WATCHW=addr[+words]` logs writes with the guest call stack, checked at every loop back-edge
+  (slow). src/runtime/hle_models.cpp: pre-hooks `?<addr> = CallLog` (BLITZ_DEBUG_CALLS=1 logs calls with
+  args + stack) and `?0x801DDF98 = ModelListDebug` (BLITZ_DEBUG_MODELS=<frame>: the scene renderer's
+  player groups, draw lists and model elements); add them to config/hooks.txt only while debugging.
+- Player models (RenderWare): per-player textures (jersey number = MatFX dual texture, set per player by
+  80094EC0/801DF668; base texture overrides 801DF534) live in a material plugin; 8005FA50 re-points the
+  shared template materials (0x80286180[...]) to each team's textures every frame.
 - Draws wait for pipeline compilation (GX_AURORA_SET_DRAWS_BLOCKING each frame): with Aurora's
   default (skip a draw until its pipeline is ready) the players' jersey number/collar panels never
   showed. BLITZ_DRAWS_ASYNC=1 restores the default. Test GX experiments with blocking on: skipped
@@ -133,7 +143,12 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - Aurora's BP 0x59 (scissor box offset) sign convention is the opposite of hardware; the bridge negates it.
 - Aurora needs its own GXInit called once (defaults); the game's stream then overrides it.
 - Hardware GX has no vertex array sizes: the bridge sizes them from each draw's max index.
-- RenderWare calls display lists at unaligned addresses/sizes: the CP ignores the low 5 bits.
+- The write-gather pipe stores to RAM in 32-byte bursts and the PI write pointer only moves in whole
+  bursts (gx_fifo.cpp). GXEndDisplayList sizes display lists from it and RenderWare packs each mesh's
+  list after the previous one: with a byte-granular pointer, later lists started mid-burst, the CP (whole
+  32-byte fetches) cut off their draws and every multi-mesh model lost meshes (helmet shells, jersey
+  number/logo/collar panels; ~10% of player meshes). mtspr WPAR (GXResetWriteGatherPipe, before each
+  RW display list) drops a partial burst.
 - The game cancels and re-creates threads in the same OSThread struct: the scheduler retires the old record.
 - Windows timer resolution is raised to 1 ms at startup (retrace pacing), and the process opts out of
   power throttling: Windows 11 otherwise ignores the 1 ms request for a window that is not the visible
@@ -147,7 +162,8 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - Aurora reads vertex arrays/TLUTs when it processes the frame, after the game reused the memory:
   the bridge snapshots arrays per draw (memcmp against the last copy) and TLUTs at load time into a
   per-frame arena (BLITZ_GX_HAZARD=1 reports guest memory changing between uses). Textures are still
-  read in place (rarely changed mid-frame).
+  read in place (rarely changed mid-frame). (Copying arrays at frame end instead was tried and is
+  wrong: buffers rewritten between draws of one frame would all draw the last contents.)
 - Widescreen with centered 2D: a 2D draw whose own vertices span the whole width is drawn with the
   game's unscaled projection when it covers a 3D scene (fades, the play-start flash) or is a clear quad
   (depth ALWAYS + write); tiled 2D art and HUD stay 4:3. Aurora ignores partial projection writes:

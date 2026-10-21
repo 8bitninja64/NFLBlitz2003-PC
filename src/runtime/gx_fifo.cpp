@@ -221,17 +221,30 @@ void gpReceive(const uint8_t* bytes, uint32_t n) {
 }
 
 // --- write-gather pipe ------------------------------------------------------------
+// The pipe stores to RAM in 32-byte bursts, so the CPU FIFO write pointer only moves in whole bursts.
+// GXEndDisplayList sizes a display list from it: RenderWare packs each mesh's list right after the
+// previous one, and with a byte-granular pointer later lists started mid-burst and the CP (which
+// fetches whole 32-byte units) cut off their draws: helmet shells and jersey panels went missing.
+// A burst lands at the write pointer; a burst at the end address wraps the pointer to the base and
+// sets the wrap flag (bit 26, which GXEndDisplayList reports as an overflow).
+uint8_t g_gather[32];
+uint32_t g_gatherLen = 0;
+
+void writeBurst() {
+  g_gatherLen = 0;
+  if (g_piFifoEnd <= g_piFifoBase) return;
+  uint32_t w = g_piFifoWptr & 0x03FFFFE0;
+  memcpy(&guest::g_mem[w & guest::kMemMask & ~31u], g_gather, 32);
+  if (w == (g_piFifoEnd & 0x03FFFFE0)) g_piFifoWptr = (g_piFifoBase & 0x03FFFFE0) | 0x04000000;
+  else g_piFifoWptr = (g_piFifoWptr & 0x04000000) | (w + 32);
+}
+
 void wgpWrite(uint32_t v, int size) {
   uint8_t bytes[4];
   for (int i = 0; i < size; i++) bytes[i] = (uint8_t)(v >> (8 * (size - 1 - i)));
-  // Into guest RAM at the CPU FIFO write pointer (display lists are built this way).
-  if (g_piFifoEnd > g_piFifoBase) {
-    for (int i = 0; i < size; i++) {
-      guest::g_mem[g_piFifoWptr & guest::kMemMask] = bytes[i];
-      g_piFifoWptr++;
-      if ((g_piFifoWptr & 0x03FFFFFF) >= (g_piFifoEnd & 0x03FFFFFF))
-        g_piFifoWptr = (g_piFifoBase & 0x03FFFFFF) | 0x04000000;  // wrapped
-    }
+  for (int i = 0; i < size; i++) {
+    g_gather[g_gatherLen++] = bytes[i];
+    if (g_gatherLen == 32) writeBurst();
   }
   if (gpReading()) gpReceive(bytes, (uint32_t)size);
 }
@@ -373,6 +386,8 @@ void init() {
 }
 
 void setSink(Sink* sink) { g_sink = sink; }
+
+void resetGatherPipe() { g_gatherLen = 0; }
 
 Stats stats() { return g_stats; }
 

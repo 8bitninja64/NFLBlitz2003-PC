@@ -71,6 +71,11 @@ static void printRing(const char* name, const guest::TraceRing& r) {
 
 void dumpCallTrace() { printRing("current", *threadRing()); }
 
+uint32_t currentGuestFunction() {
+  const guest::TraceRing& r = *threadRing();
+  return r.addr[(r.pos - 1) & 63];
+}
+
 void dumpAllTraces() {
   std::lock_guard lk(g_ringMutex);
   for (auto& [name, ring] : g_rings) printRing(name, *ring);

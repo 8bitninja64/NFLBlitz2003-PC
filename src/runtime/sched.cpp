@@ -5,10 +5,14 @@
 
 #include "boot.h"
 #include "func_table.h"
+#include "hw.h"
 #include "log.h"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <mutex>
 #include <thread>
@@ -51,6 +55,8 @@ static std::condition_variable g_idleCv;
 static Thread* g_running = nullptr;
 static std::vector<Thread*> g_threads;
 static std::deque<std::function<void(guest::Ctx&)>> g_irqs;
+static std::atomic<bool> g_irqQueued{false};  // g_irqs is not empty (g_irqPending may be held up by BLITZ_WATCHW)
+static const bool g_holdIrqFlag = getenv("BLITZ_WATCHW") != nullptr;  // keep checkIrq polling the watch
 static int g_schedDisable = 0;
 static Thread g_idle;
 static Thread* g_main = nullptr;
@@ -130,6 +136,7 @@ uint32_t guestAddr(Thread* t) { return t ? t->addr : 0; }
 void postIrq(std::function<void(guest::Ctx&)> fn) {
   std::lock_guard lk(g_m);
   g_irqs.push_back(std::move(fn));
+  g_irqQueued = true;
   guest::g_irqPending = 1;
   if (!g_running) g_idleCv.notify_one();
 }
@@ -140,7 +147,8 @@ static void deliver(guest::Ctx& c) {
     {
       std::lock_guard lk(g_m);
       if (g_irqs.empty()) {
-        guest::g_irqPending = 0;
+        g_irqQueued = false;
+        guest::g_irqPending = g_holdIrqFlag ? 1 : 0;
         return;
       }
       fn = std::move(g_irqs.front());
@@ -352,6 +360,7 @@ void reacquireCpu(guest::Ctx& c) {
   } else {
     // Ask the running thread to reschedule at its next safe point.
     g_irqs.push_back([](guest::Ctx&) {});
+    g_irqQueued = true;
     guest::g_irqPending = 1;
   }
   waitForCpu(lk, self);
@@ -383,6 +392,21 @@ void dumpGuestStacks() {
     }
     logf(LogLevel::Error, "%s", line);
   }
+}
+
+std::string currentBacktrace() {
+  Thread* t = t_self;
+  if (!t || !t->ctx) return "?";
+  char line[512];
+  int n = snprintf(line, sizeof(line), "lr %08X:", t->ctx->lr);
+  uint32_t sp = t->ctx->r[1];
+  for (int depth = 0; depth < 24 && sp >= 0x80000000u && sp < 0x81800000u && n < (int)sizeof(line) - 12; depth++) {
+    uint32_t back = guest::rd32(sp);
+    if (back < 0x80000000u || back >= 0x81800000u || back <= sp) break;
+    n += snprintf(line + n, sizeof(line) - n, " %08X", guest::rd32(back + 4));
+    sp = back;
+  }
+  return line;
 }
 
 // --- idle loop and main thread ---------------------------------------------------
@@ -438,7 +462,38 @@ void runMainThread(uint32_t entry) {
 
 namespace guest {
 
+// BLITZ_WATCHW=addr[+words],...: log guest words when they change, with the guest call stack and
+// recent functions, checked at every loop back-edge (debugging; slow: keeps the IRQ flag raised).
+static const char* const g_watchW = getenv("BLITZ_WATCHW");
+
+static void pollWriteWatch(Ctx& c) {
+  static uint32_t last[64];
+  static int logged = 0;
+  static bool primed = false;  // the first poll records the current values
+  int k = 0;
+  for (const char* q = g_watchW; q && *q && k < 64; q = strchr(q, ',') ? strchr(q, ',') + 1 : nullptr) {
+    char* end = nullptr;
+    uint32_t a = (uint32_t)strtoul(q, &end, 16), n = *end == '+' ? (uint32_t)strtoul(end + 1, nullptr, 10) : 1;
+    for (uint32_t w = 0; w < n && k < 64; w++, k++) {
+      uint32_t v = guest::rd32(a + 4 * w);
+      if (primed && v != last[k] && logged < 200) {
+        logged++;
+        LOG_INFO("watchw %08X: %08X -> %08X frame %u at %s", a + 4 * w, last[k], v, hw::g_framesBuilt.load(), sched::currentBacktrace().c_str());
+        dumpCallTrace();
+      }
+      last[k] = v;
+    }
+  }
+  primed = true;
+  (void)c;
+}
+
 void checkIrq(Ctx& c) {
+  if (g_watchW) {
+    pollWriteWatch(c);
+    g_irqPending = 1;
+    if (!sched::g_irqQueued) return;
+  }
   if (!(c.msr & sched::kMsrEE) || sched::t_irqDepth > 0) return;
   sched::deliver(c);
   std::unique_lock lk(sched::g_m);

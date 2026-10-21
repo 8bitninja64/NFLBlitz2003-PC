@@ -2,6 +2,7 @@
 // paired-single quantization, traps.
 #include "ctx.h"
 #include "func_table.h"
+#include "gx_fifo.h"
 #include "log.h"
 
 #include <atomic>
@@ -87,6 +88,7 @@ uint32_t readSpr(Ctx& c, uint32_t spr, uint32_t pc) {
   case 26: return c.srr0;
   case 27: return c.srr1;
   case 287: return 0x00083214;  // PVR: Gekko
+  case 921: return 0;           // WPAR: gather pipe not busy (bursts are stored immediately)
   default:
     logf(LogLevel::Debug, "mfspr %u at %08X", spr, pc);
     return 0;
@@ -103,6 +105,7 @@ void writeSpr(Ctx& c, uint32_t spr, uint32_t v, uint32_t pc) {
   case 920: c.hid2 = v; break;
   case 26: c.srr0 = v; break;
   case 27: c.srr1 = v; break;
+  case 921: gxfifo::resetGatherPipe(); break;  // WPAR (GXResetWriteGatherPipe, before each RW display list)
   default: logf(LogLevel::Debug, "mtspr %u = %08X at %08X", spr, v, pc); break;
   }
 }

@@ -18,6 +18,7 @@ struct Sink {
 
 void init();  // registers CP/PE/PI MMIO and the write-gather sink
 void setSink(Sink* sink);
+void resetGatherPipe();  // mtspr WPAR: bytes not yet stored as a 32-byte burst are dropped
 
 struct Stats {
   uint64_t commands, draws, bpWrites, xfWrites, cpWrites, displayLists, displayCopies, bytes;
