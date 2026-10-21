@@ -475,7 +475,12 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
     uint32_t n = (uint32_t)p[1] << 8 | p[2];
     uint32_t prim = (p[0] >> 3) & 7;  // 0 quads, 1 quads2, 2 tris, 3 strip, 4 fan, 5 lines, 6 linestrip, 7 points
     static const uint8_t kMin[8] = {4, 4, 3, 3, 3, 2, 2, 1};
-    if (n < kMin[prim]) return;
+    if (n < kMin[prim]) {
+      static const bool dropLog = getenv("BLITZ_GX_DROPLOG") != nullptr;
+      static int logged = 0;
+      if (dropLog && n > 0 && logged++ < 50) LOG_INFO("GX dropped draw: prim %u with %u vertices", prim, n);
+      return;
+    }
   }
   // BLITZ_GX_SKIPBLEND=<hex>: drop draws whose blend mode (BP 0x41 low 16 bits) matches (debugging).
   static const long skipBlend = getenv("BLITZ_GX_SKIPBLEND") ? strtol(getenv("BLITZ_GX_SKIPBLEND"), nullptr, 16) : -1;
@@ -548,7 +553,9 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
   }
   // BLITZ_GX_POSLOG=<stages>: log indexed positions of draws with this many TEV stages (debugging).
   static const int posLogStages = getenv("BLITZ_GX_POSLOG") ? atoi(getenv("BLITZ_GX_POSLOG")) : 0;
-  if (posLogStages && (int)field(m_genMode, 4, 10) + 1 >= posLogStages && attrs[gxfifo::kAttrPos].type >= 2) {
+  static const uint32_t posLogCount = getenv("BLITZ_GX_POSLOG_N") ? (uint32_t)atoi(getenv("BLITZ_GX_POSLOG_N")) : 0;
+  if (posLogStages && (int)field(m_genMode, 4, 10) + 1 >= posLogStages && attrs[gxfifo::kAttrPos].type >= 2 &&
+      (!posLogCount || posLogCount == count)) {
     static int logged = 0;
     if (logged < 60) {
       logged++;
@@ -581,6 +588,8 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
       };
       const uint32_t* m = &m_xfMtx[(m_mtxIdxA & 63) * 4];
       float p4 = f32(m_proj[4]), p5 = f32(m_proj[5]), dmin = 9, dmax = -9;
+      float p0 = f32(m_proj[0]), p1 = f32(m_proj[1]), p2 = f32(m_proj[2]), p3 = f32(m_proj[3]);
+      float xmin = 9, xmax = -9, ymin = 9, ymax = -9;
       const uint8_t* vv = p + 3 + offset;
       for (uint32_t n = 0; n < count; n++, vv += stride) {
         uint32_t idx = attrs[gxfifo::kAttrPos].type == 2 ? vv[0] : (uint32_t)vv[0] << 8 | vv[1];
@@ -588,16 +597,29 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
         float x = f32(be32(e)), y = f32(be32(e + 4)), z = f32(be32(e + 8));
         float ez = f32(m[8]) * x + f32(m[9]) * y + f32(m[10]) * z + f32(m[11]);
         float d = m_projType ? 1 + p4 * ez + p5 : 1 + (p4 * ez + p5) / -ez;
+        float ex = f32(m[0]) * x + f32(m[1]) * y + f32(m[2]) * z + f32(m[3]);
+        float ey = f32(m[4]) * x + f32(m[5]) * y + f32(m[6]) * z + f32(m[7]);
+        float nx = m_projType ? p0 * ex + p1 : (p0 * ex + p1 * ez) / -ez;
+        float ny = m_projType ? p2 * ey + p3 : (p2 * ey + p3 * ez) / -ez;
+        xmin = nx < xmin ? nx : xmin, xmax = nx > xmax ? nx : xmax, ymin = ny < ymin ? ny : ymin, ymax = ny > ymax ? ny : ymax;
         dmin = d < dmin ? d : dmin, dmax = d > dmax ? d : dmax;
       }
-      LOG_INFO("pos stages=%u n=%u base %08X stride %u mtx %u tx %.1f depth %.5f..%.5f:%s", field(m_genMode, 4, 10) + 1, count,
-               pa.base, pa.stride, m_mtxIdxA & 63, m3, dmin, dmax, line.c_str());
+      LOG_INFO("pos stages=%u n=%u base %08X stride %u mtx %u tx %.1f depth %.5f..%.5f ndc x %.2f..%.2f y %.2f..%.2f:%s",
+               field(m_genMode, 4, 10) + 1, count, pa.base, pa.stride, m_mtxIdxA & 63, m3, dmin, dmax, xmin, xmax, ymin,
+               ymax, line.c_str());
     }
   }
   const settings::Settings& st = settings::get();
   bool stretch = st.widescreen && st.hud == settings::Hud2D::Centered && m_projType == 1 &&
                  isFullScreen2d(p, count, attrs, vat);
   if (m_projType == 0) m_frameHas3d = true;
+  static const bool forceDirty = getenv("BLITZ_GX_FORCEDIRTY") != nullptr;  // experiment
+  if (forceDirty) {
+    put8(0x61);
+    put32(0x41000000u | ((m_bp41 ^ 0x4) & 0xFFFFFF));
+    put8(0x61);
+    put32(0x41000000u | m_bp41);
+  }
   // BLITZ_GX_PAINT=<draw index>[,...]: draw these draws (per frame) solid white, opaque (debugging).
   static const char* paint = getenv("BLITZ_GX_PAINT");
   uint32_t drawIndex = m_drawInFrame++;
@@ -922,7 +944,10 @@ void Bridge::endFrame() {
     sumWait = sumGuest = 0;
   }
   m_hashes.clear();
-  if (getenv("BLITZ_DRAWS_BLOCKING")) {
+  // Draws wait for their pipeline to compile. With Aurora's default (skip a draw until its pipeline
+  // is ready) the jersey number/collar panels of players never appeared. BLITZ_DRAWS_ASYNC=1 restores it.
+  static const bool async = getenv("BLITZ_DRAWS_ASYNC") != nullptr;
+  if (!async) {
     aurora(GX_AURORA_SET_DRAWS_BLOCKING);
     put8(1);
   }

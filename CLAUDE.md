@@ -123,6 +123,10 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   reason, re-encode the state under another cache key (e.g. an unused swap field) to test for this.
 - Per-draw debugging: `BLITZ_GX_PAINT=<n>` (draw n of each frame white/opaque), `BLITZ_GX_DRAWBP=<n>:<reg>=<v>;...`
   (BP overrides for one draw), `BLITZ_PEEKZ=x,y;...` (EFB depth at the BLITZ_SHOT frame).
+- Draws wait for pipeline compilation (GX_AURORA_SET_DRAWS_BLOCKING each frame): with Aurora's
+  default (skip a draw until its pipeline is ready) the players' jersey number/collar panels never
+  showed. BLITZ_DRAWS_ASYNC=1 restores the default. Test GX experiments with blocking on: skipped
+  draws make results vary from run to run.
 - Aurora fixes live in patches/aurora/*.patch (tools/build.ps1 applies them; the submodule stays at
   upstream). 0001: @invariant vertex position: overlays drawn on the same vertices with LEQUAL
   (jersey names/numbers, face details, helmet shine) z-failed between shader variants.
