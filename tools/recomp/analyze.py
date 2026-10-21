@@ -6,17 +6,45 @@ text sections into contiguous functions and recovers bctr jump tables.
 
 Usage: python -I analyze.py <main.dol> <out.json>
 """
+import bisect
 import json
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dol import Dol
-from ppc import decode
+from ppc import BRANCH_OPS, decode
 
 
 def is_uncond_bc(bo):
     return (bo & 0x14) == 0x14
+
+
+VOLATILE = {0} | set(range(3, 13))  # r0, r3-r12: clobbered by calls
+_WRITES_RD = {'addi', 'addis', 'addic', 'addic.', 'subfic', 'mulli', 'add', 'addc', 'adde', 'addme', 'addze',
+              'subf', 'subfc', 'subfe', 'subfme', 'subfze', 'neg', 'mullw', 'mulhw', 'mulhwu', 'divw', 'divwu',
+              'lwz', 'lbz', 'lhz', 'lha', 'lwzx', 'lbzx', 'lhzx', 'lhax', 'lwbrx', 'lhbrx', 'lwarx',
+              'mfspr', 'mftb', 'mfcr', 'mfmsr', 'mfsr', 'mfsrin', 'eciwx'}
+_WRITES_RD_RA = {'lwzu', 'lbzu', 'lhzu', 'lhau', 'lwzux', 'lbzux', 'lhzux', 'lhaux'}
+_WRITES_RA = {'ori', 'oris', 'xori', 'xoris', 'andi.', 'andis.', 'rlwinm', 'rlwimi', 'rlwnm', 'and', 'andc', 'or',
+              'orc', 'xor', 'nand', 'nor', 'eqv', 'slw', 'srw', 'sraw', 'srawi', 'cntlzw', 'extsb', 'extsh',
+              'stwu', 'stbu', 'sthu', 'stwux', 'stbux', 'sthux', 'lfsu', 'lfdu', 'lfsux', 'lfdux',
+              'stfsu', 'stfdu', 'stfsux', 'stfdux', 'psq_lu', 'psq_lux', 'psq_stu', 'psq_stux'}
+
+
+def gpr_writes(ins):
+    """GPRs an instruction writes (not counting what a call clobbers)."""
+    if ins.op in _WRITES_RD:
+        return (ins.rd,)
+    if ins.op in _WRITES_RA:
+        return (ins.ra,)
+    if ins.op in _WRITES_RD_RA:
+        return (ins.rd, ins.ra)
+    if ins.op == 'lmw':
+        return tuple(range(ins.rd, 32))
+    if ins.op == 'lswi':
+        return tuple((ins.rd + k) & 31 for k in range((ins.imm + 3) // 4))
+    return ()
 
 
 class Analysis:
@@ -68,15 +96,21 @@ class Analysis:
                     self.code_ptrs.add(v)
         return starts
 
-    def find_jump_tables(self):
-        """Map bctr address -> list of targets."""
+    def find_jump_tables(self, starts):
+        """Map bctr address -> list of targets.
+
+        A switch is lwzx rC,rA,rB ; mtctr rC ; bctr where rA or rB holds the table address, set by
+        lis (+ addi) shortly before or, for a switch in a loop, hoisted into a callee-saved register by
+        the prologue. The cmplwi guarding the switch bounds it; every case must lie between the call
+        targets around the bctr (the function), which rejects tables of function pointers.
+        """
+        calls = sorted(starts)
         tables = {}
         for a, ins in self.insns.items():
             if not (ins.op == 'bcctr' and not ins.lk and is_uncond_bc(ins.rd)):
                 continue
             ctr_reg = None
-            idx = None
-            base = {}
+            load = None
             bound = None
             for back in range(1, 24):
                 p = self.insns.get(a - 4 * back)
@@ -86,36 +120,61 @@ class Analysis:
                     if p.op == 'mtspr' and p.spr == 9:
                         ctr_reg = p.rd
                     continue
-                if idx is None:
+                if load is None:
                     if p.op == 'lwzx' and p.rd == ctr_reg:
-                        idx = (p.ra, p.rb)
+                        load = p
                     elif p.op == 'lwz' and p.rd == ctr_reg:
                         break  # loaded function pointer, not a table
                     continue
-                if p.op == 'addi' and p.rd == p.ra and p.rd in idx and 'lo' not in base:
-                    base['lo'] = p.imm
-                    base['reg'] = p.rd
-                elif p.op == 'addis' and p.ra == 0 and p.rd == base.get('reg', -1) and 'hi' not in base:
-                    base['hi'] = p.imm << 16
-                elif p.op == 'cmpli' and bound is None:
+                if p.op == 'cmpli' and bound is None:
                     bound = p.imm + 1
-            if idx is None or 'hi' not in base or 'lo' not in base:
+            if load is None:
                 continue
-            tbl = (base['hi'] + base['lo']) & 0xFFFFFFFF
+            sec_lo, sec_hi = next((lo, hi) for lo, hi in self.text_ranges if lo <= a < hi)
+            k = bisect.bisect_right(calls, a)
+            lo = max(calls[k - 1], sec_lo) if k else sec_lo
+            hi = min(calls[k], sec_hi) if k < len(calls) else sec_hi
+            tbl = next((v for v in (self._reg_const(load.addr, r, lo) for r in (load.ra, load.rb))
+                        if v is not None), None)
+            if tbl is None:
+                continue
             targets = []
             n = bound if bound is not None else 1024
             for k in range(n):
                 v = self.dol.read32(tbl + 4 * k)
-                if v is None or not self.in_text(v) or v & 3:
+                if v is None or not lo <= v < hi or v & 3:
                     break
                 targets.append(v)
             if targets:
                 tables[a] = {'table': tbl, 'targets': targets, 'bounded': bound is not None}
         return tables
 
+    def _reg_const(self, a, reg, lo):
+        """Address in reg at a when lis (+ addi/ori) set it: searched back through straight-line code
+        for a volatile register, back to the prologue (stwu r1) for a callee-saved one; None otherwise."""
+        x = a - 4
+        while x >= lo:
+            p = self.insns[x]
+            if reg in VOLATILE and (self.is_terminator(p) or (p.op in BRANCH_OPS and p.lk)):
+                return None
+            if reg in gpr_writes(p):
+                if p.op == 'addis' and p.ra == 0:
+                    return (p.imm << 16) & 0xFFFFFFFF
+                if p.op == 'addi' and p.ra != 0:
+                    v = self._reg_const(x, p.ra, lo)
+                    return None if v is None else (v + p.imm) & 0xFFFFFFFF
+                if p.op == 'ori':
+                    v = self._reg_const(x, p.rd, lo)
+                    return None if v is None else v | p.imm
+                return None
+            if p.op == 'stwu' and p.rd == 1 and p.ra == 1:
+                return None  # the function's first instructions
+            x -= 4
+        return None
+
     def run(self):
         starts = self.find_starts()
-        self.tables = self.find_jump_tables()
+        self.tables = self.find_jump_tables(starts)
         jt_targets = {t for v in self.tables.values() for t in v['targets']}
         jt_addrs = set()
         for v in self.tables.values():
@@ -214,7 +273,10 @@ def main():
     kinds = {}
     for f in funcs:
         kinds[f['kind']] = kinds.get(f['kind'], 0) + 1
-    print(f'{len(funcs)} functions {kinds}, {len(an.tables)} jump tables, {illegal} illegal words')
+    unrecovered = sum(1 for a, i in an.insns.items()
+                      if i.op == 'bcctr' and not i.lk and is_uncond_bc(i.rd) and a not in an.tables)
+    print(f'{len(funcs)} functions {kinds}, {len(an.tables)} jump tables ({unrecovered} bctr left to '
+          f'callIndirect), {illegal} illegal words')
     out = {
         'entry': dol.entry,
         'functions': funcs,
