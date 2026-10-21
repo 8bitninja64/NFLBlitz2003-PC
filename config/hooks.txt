@@ -59,3 +59,7 @@ CARDGetSectorSize
 ?0x8010A41C = MoviePlay
 # Front end main loop (hle_movie.cpp): pre-hook, fast-forwards the timed boot screens (skip_logos)
 ?0x8002CE68 = FrontEndLoop
+# Widescreen (hle_widescreen.cpp): pre-hooks; the culling frustum covers the Hor+ view (players, crowd
+# and stadium vanished at the sides of a 16:9 match), game logic keeps testing the game's 4:3 view
+?0x80201AEC = WideCullFrustum
+?0x80203570 = FrustumTestForLogic

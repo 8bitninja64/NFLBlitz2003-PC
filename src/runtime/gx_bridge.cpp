@@ -6,6 +6,7 @@
 #include "memory.h"
 #include "sched.h"
 #include "settings.h"
+#include "widescreen.h"
 
 #include <dolphin/gx/GXAurora.h>
 #include <dolphin/gx/GXCommandList.h>
@@ -114,6 +115,9 @@ private:
   uint32_t m_proj[7] = {};       // XF 0x1020-0x1026 as the game wrote them
   uint32_t m_mtxIdxA = 0;        // XF 0x1018
   bool m_frameHas3d = false;     // a perspective draw happened earlier in this frame
+  bool m_menuMode = false;       // this frame is a front-end menu to stretch (latched per frame)
+  // Menu art keeps out of the top/bottom ~12 lines (TV overscan); this zoom fills those bars.
+  static constexpr float kMenuZoom = 1.05f;
   bool isFullScreen2d(const uint8_t* p, uint32_t count, const gxfifo::Attr* attrs, uint32_t vat);
   void putProjX(float scale);
   void cp(uint8_t reg, uint32_t v, const uint8_t* raw);
@@ -611,7 +615,7 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
     }
   }
   const settings::Settings& st = settings::get();
-  bool stretch = st.widescreen && st.hud == settings::Hud2D::Centered && m_projType == 1 &&
+  bool stretch = st.widescreen && !m_menuMode && st.hud == settings::Hud2D::Centered && m_projType == 1 &&
                  isFullScreen2d(p, count, attrs, vat);
   if (m_projType == 0) m_frameHas3d = true;
   static const bool forceDirty = getenv("BLITZ_GX_FORCEDIRTY") != nullptr;  // experiment
@@ -776,10 +780,12 @@ static bool dropped(const uint8_t* p) {
   return strstr(env, key) != nullptr;
 }
 
-// Widescreen: the content framebuffer has the window's aspect (Aurora STRETCH policy) and
-// the game's 4:3 projections are narrowed horizontally by (4/3) / aspect. Perspective (3D)
-// therefore sees more to the sides (Hor+); orthographic (2D) screens end up centered at
-// 4:3, or stay stretched if the user prefers.
+// Widescreen: the content framebuffer has the window's aspect (Aurora STRETCH policy). In a match
+// the game's 4:3 projections are narrowed horizontally by (4/3) / aspect: perspective (3D) sees
+// more to the sides (Hor+) and orthographic (2D) ends up centered at 4:3, or stays stretched if
+// the user prefers. In the front-end menus (stretch_menus) the whole 4:3 frame is stretched to the
+// window instead and zoomed vertically over the margins the menu art leaves for TV overscan; 2D
+// and 3D stay aligned (team select draws 3D players inside 2D frames).
 void Bridge::xf(const uint8_t* p, uint32_t size) {
   uint32_t header = be32(p + 1);
   uint32_t first = header & 0xFFFF, count = (header >> 16) + 1;
@@ -811,21 +817,22 @@ void Bridge::xf(const uint8_t* p, uint32_t size) {
     return;
   }
   if (first <= 0x1026 && first + count > 0x1026) m_projType = be32(p + 5 + 4 * (0x1026 - first));
-  float k = (4.0f / 3.0f) / settings::g_displayAspect.load();
-  if (m_projType == 1 && st.hud == settings::Hud2D::Stretched) k = 1.0f;
+  float kx = (4.0f / 3.0f) / settings::g_displayAspect.load(), ky = 1.0f;
+  if (m_menuMode) kx = 1.0f, ky = kMenuZoom;
+  else if (m_projType == 1 && st.hud == settings::Hud2D::Stretched) kx = 1.0f;
   uint8_t buf[5 + 4 * 64];
-  if (size > sizeof(buf) || k == 1.0f) {
+  if (size > sizeof(buf) || (kx == 1.0f && ky == 1.0f)) {
     putRaw(p, size);
     return;
   }
   memcpy(buf, p, size);
-  for (uint32_t reg : {0x1020u, 0x1021u}) {
+  for (uint32_t reg : {0x1020u, 0x1021u, 0x1022u, 0x1023u}) {
     if (reg < first || reg >= first + count) continue;
     uint8_t* w = buf + 5 + 4 * (reg - first);
     uint32_t bits = be32(w);
     float f;
     memcpy(&f, &bits, 4);
-    f *= k;
+    f *= reg < 0x1022u ? kx : ky;
     memcpy(&bits, &f, 4);
     w[0] = (uint8_t)(bits >> 24);
     w[1] = (uint8_t)(bits >> 16);
@@ -982,6 +989,11 @@ void Bridge::endFrame() {
   // Aurora has consumed the frame: its snapshots can be reused.
   m_arena.reset();
   m_drawInFrame = 0;
+  // The quarter-break loading screen (no 3D) runs while the game still reports the match: a frame
+  // without 3D there is a menu too.
+  const settings::Settings& st = settings::get();
+  m_menuMode = st.widescreen && st.stretchMenus &&
+               (!widescreen::inMatch() || (widescreen::inQuarterBreak() && !m_frameHas3d));
   m_frameHas3d = false;
   for (TlutCopy& c : m_tlutCopies) c.data = nullptr;
   for (Array& a : m_arrays) a.snapshot = nullptr, a.emittedSize = 0;

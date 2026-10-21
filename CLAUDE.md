@@ -66,7 +66,8 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - `src/runtime/settings.*`: settings.ini in %APPDATA%/NFL Blitz 2003 (BLITZ_SET="k=v;k=v" overrides).
 
 ## Build / run
-- `powershell -ExecutionPolicy Bypass -File tools/build.ps1 [-SkipRecomp] [-Configure] [-Target blitz]`
+- `powershell -ExecutionPolicy Bypass -File tools/build.ps1 [-SkipRecomp] [-Configure] [-Target blitz] [-BuildDir dir]`
+  (a second -BuildDir lets two sessions build/test side by side; tools/shot.ps1 takes -BuildDir too)
   (VS 2022 BuildTools env via tools/vsenv.ps1; clang-cl + Ninja; Aurora fetches Dawn/SDL3 prebuilts).
 - `build/windows-clang/NFLBlitz2003.exe [--disc <iso>] [-v]` (default disc: ./NFL Blitz 2003 (USA).iso).
 - Windows defaults to Dawn's D3D11 backend: D3D12/Vulkan presented at ~20 fps even for empty frames on
@@ -171,6 +172,19 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   game's unscaled projection when it covers a 3D scene (fades, the play-start flash) or is a clear quad
   (depth ALWAYS + write); tiled 2D art and HUD stay 4:3. Aurora ignores partial projection writes:
   always emit XF 0x1020-0x1026 as one block.
+- Widescreen modes (hle_widescreen.cpp, latched per frame in Bridge::endFrame): in a match
+  (widescreen::inMatch(): Game structure *(0x80283898) != 0, state +0xC not halftime 0x80000 nor the
+  end-of-quarter tips) 3D is Hor+; in the front-end menus (stretch_menus) the whole 4:3 frame is stretched
+  and zoomed 1.05x vertically over the menu art's overscan margins, so team select's 3D players stay in
+  their 2D rings. Pause menu and play select count as in-match (drawn over the 3D field).
+- The game culls against its own 4:3 RenderWare frustum (planes cam+0x98 / corners +0x128 built by
+  80201AEC from viewWindow; bbox +0x110): players (801E0C8C -> 801DDB74), crowd billboards (801D24C8),
+  stadium atomics (800F3A7C), world sectors (801EF7DC) vanished at the sides of a 16:9 match. The
+  WideCullFrustum pre-hook builds the planes for the Hor+ view (viewWindow.x widened only while the
+  builder runs, so the view matrix/projection are untouched) and keeps the game's 4:3 planes for the two
+  gameplay callers of RwCameraFrustumTestSphere (80203570 from 8002EF38 off-screen pass target and
+  8006A464 off-screen catch-up), which FrustumTestForLogic swaps in. 3D particles (80112978) still cull
+  in 4:3 screen space. BLITZ_NO_WIDECULL=1 for A/B.
 - Discs are read through nod (aurora::dvd's dependency): ISO, RVZ, WIA, CISO, GCZ, NFS.
 - Don't write C/C++ with escapes through bash heredocs/python-in-bash; use the Write/Edit tools.
 

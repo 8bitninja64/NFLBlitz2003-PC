@@ -25,6 +25,7 @@ static void applySetting(const std::string& key, const std::string& v) {
   if (key == "disc") s.disc = v;
   else if (key == "widescreen") s.widescreen = parseBool(v);
   else if (key == "hud") s.hud = v == "stretched" ? Hud2D::Stretched : Hud2D::Centered;
+  else if (key == "stretch_menus") s.stretchMenus = parseBool(v);
   else if (key == "fullscreen") s.fullscreen = parseBool(v);
   else if (key == "vsync") s.vsync = parseBool(v);
   else if (key == "msaa") s.msaa = (uint32_t)atoi(v.c_str());
@@ -102,7 +103,8 @@ void save() {
       << "skip_logos = " << (s.skipLogos ? "on" : "off") << "   # skip the logo movies and the football intro at boot\n"
       << "\n[display]\n"
       << "widescreen = " << (s.widescreen ? "on" : "off") << "   # Hor+ 3D at the window's aspect ratio\n"
-      << "hud = " << (s.hud == Hud2D::Stretched ? "stretched" : "centered") << "   # 2D screens: centered | stretched\n"
+      << "hud = " << (s.hud == Hud2D::Stretched ? "stretched" : "centered") << "   # in-match HUD/2D: centered | stretched\n"
+      << "stretch_menus = " << (s.stretchMenus ? "on" : "off") << "   # menus fill the 16:9 screen\n"
       << "fullscreen = " << (s.fullscreen ? "on" : "off") << "   # Alt+Enter / F11 toggles\n"
       << "vsync = " << (s.vsync ? "on" : "off") << "\n"
       << "msaa = " << s.msaa << "   # 1 2 4 8\n"

@@ -1,10 +1,11 @@
 # Builds the port: extract the DOL from the disc, analyze, recompile, compile.
-#   powershell -ExecutionPolicy Bypass -File tools/build.ps1 [-Disc <iso>] [-Configure] [-Target blitz_headless] [-SkipRecomp]
+#   powershell -ExecutionPolicy Bypass -File tools/build.ps1 [-Disc <iso>] [-Configure] [-Target blitz_headless] [-SkipRecomp] [-BuildDir dir]
 param(
   [string]$Disc = "NFL Blitz 2003 (USA).iso",
   [switch]$Configure,
   [switch]$SkipRecomp,
-  [string]$Target = "blitz_headless"
+  [string]$Target = "blitz_headless",
+  [string]$BuildDir = "build/windows-clang"  # a second directory lets two builds/test runs proceed side by side
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -30,7 +31,7 @@ if (-not $SkipRecomp) {
   python -I tools/recomp/recomp.py orig/main.dol build/analysis/functions.json config/sdk_symbols.txt,config/symbols.txt config/hooks.txt build/recomp_gen; if ($LASTEXITCODE) { exit 1 }
 }
 
-$bdir = "build/windows-clang"
+$bdir = $BuildDir
 if ($Configure -or -not (Test-Path "$bdir/build.ninja")) {
   cmake -S . -B $bdir -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
   if ($LASTEXITCODE) { exit 1 }

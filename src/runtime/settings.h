@@ -15,7 +15,8 @@ struct Settings {
   bool skipLogos = true;  // skip the logo movies and the football intro at boot
   // Display
   bool widescreen = true;      // Hor+ 3D at the window's aspect ratio
-  Hud2D hud = Hud2D::Centered;  // 2D (orthographic) screens: 4:3 centered or stretched
+  Hud2D hud = Hud2D::Centered;  // in-match 2D (HUD, play select): 4:3 centered or stretched
+  bool stretchMenus = true;     // front-end menus fill the screen (whole 4:3 frame stretched, zoomed over the margins)
   bool fullscreen = false;
   bool vsync = false;
   uint32_t msaa = 4;            // 1, 2, 4, 8

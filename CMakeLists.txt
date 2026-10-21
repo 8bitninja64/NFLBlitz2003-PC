@@ -32,6 +32,7 @@ set(BLITZ_RUNTIME_SOURCES
   src/runtime/hle_os.cpp
   src/runtime/hle_pad.cpp
   src/runtime/hle_thread.cpp
+  src/runtime/hle_widescreen.cpp
   src/runtime/hw.cpp
   src/runtime/log.cpp
   src/runtime/memory.cpp

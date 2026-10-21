@@ -177,8 +177,9 @@ void drawSettings() {
         changed = true;
       }
       ImGui::BeginDisabled(!st.widescreen);
+      if (ImGui::Checkbox("Stretch menus to fill the screen", &st.stretchMenus)) changed = true;
       int hud = st.hud == settings::Hud2D::Stretched ? 1 : 0;
-      if (ImGui::Combo("2D screens / HUD", &hud, "4:3 centered\0Stretched to fill\0")) {
+      if (ImGui::Combo("In-game HUD", &hud, "4:3 centered\0Stretched to fill\0")) {
         st.hud = hud ? settings::Hud2D::Stretched : settings::Hud2D::Centered;
         changed = true;
       }
