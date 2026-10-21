@@ -494,13 +494,13 @@ class FuncGen:
                 'fmadd': '{a} * {c} + {b}', 'fmsub': '{a} * {c} - {b}',
                 'fnmadd': '-({a} * {c} + {b})', 'fnmsub': '-({a} * {c} - {b})'}
         if op in fbin:
-            E(f'{F(rd)} = ' + fbin[op].format(a=F(ra), b=F(rb), c=F(rc)) + ';')
+            E(f'{F(rd)} = guest::roundDouble(c, ' + fbin[op].format(a=F(ra), b=F(rb), c=F(rc)) + ');')
             return
         if op.endswith('s') and op[:-1] in fbin:
-            E(f'{F(rd)} = guest::roundSingle(' + fbin[op[:-1]].format(a=F(ra), b=F(rb), c=F(rc)) + f'); {P1(rd)} = {F(rd)};')
+            E(f'{F(rd)} = guest::roundSingle(c, ' + fbin[op[:-1]].format(a=F(ra), b=F(rb), c=F(rc)) + f'); {P1(rd)} = {F(rd)};')
             return
         if op == 'fres':
-            E(f'{F(rd)} = guest::fres({F(rb)}); {P1(rd)} = {F(rd)};')
+            E(f'{F(rd)} = guest::fres(c, {F(rb)}); {P1(rd)} = {F(rd)};')
             return
         if op == 'frsqrte':
             E(f'{F(rd)} = guest::frsqrte({F(rb)});')
@@ -509,7 +509,7 @@ class FuncGen:
             E(f'{F(rd)} = guest::fsel({F(ra)}, {F(rc)}, {F(rb)});')
             return
         if op == 'frsp':
-            E(f'{F(rd)} = guest::roundSingle({F(rb)}); {P1(rd)} = {F(rd)};')
+            E(f'{F(rd)} = guest::roundSingle(c, {F(rb)}); {P1(rd)} = {F(rd)};')
             return
         if op in ('fctiw', 'fctiwz'):
             E(f'c.f[{rd}].u = guest::fctiw(c, {F(rb)}, {"true" if op == "fctiwz" else "false"});')
@@ -571,7 +571,7 @@ class FuncGen:
 
         def set2(x0, x1, rnd=True):
             if rnd:
-                E(f'{{ double t0_ = {rs}({x0}), t1_ = {rs}({x1}); c.f[{d}].d = t0_; c.ps1[{d}] = t1_; }}')
+                E(f'{{ double t0_ = {rs}(c, {x0}), t1_ = {rs}(c, {x1}); c.f[{d}].d = t0_; c.ps1[{d}] = t1_; }}')
             else:
                 E(f'{{ double t0_ = {x0}, t1_ = {x1}; c.f[{d}].d = t0_; c.ps1[{d}] = t1_; }}')
 
@@ -603,7 +603,7 @@ class FuncGen:
         elif op == 'sel':
             set2(f'guest::fsel({A0}, {C0}, {B0})', f'guest::fsel({A1}, {C1}, {B1})', False)
         elif op == 'res':
-            set2(f'guest::fres({B0})', f'guest::fres({B1})')
+            set2(f'guest::fres(c, {B0})', f'guest::fres(c, {B1})')
         elif op == 'rsqrte':
             set2(f'guest::frsqrte({B0})', f'guest::frsqrte({B1})')
         elif op == 'neg':

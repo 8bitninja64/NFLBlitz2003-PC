@@ -194,6 +194,8 @@ static void threadMain(Thread* t) {
     c.msr = kMsrEE;
     for (int k = 0; k < 8; k++) c.gqr[k] = g_main->ctx->gqr[k];
     c.hid2 = g_main->ctx->hid2;
+    // The SDK switches FPU state lazily: a new thread keeps the FPSCR it finds (non-IEEE mode from OSInit).
+    c.fpscr = g_main->ctx->fpscr;
     c.lr = 0;
     guest::callIndirect(c, t->entry);
     exitCurrent(c, c.r[3]);

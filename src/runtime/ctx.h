@@ -183,7 +183,22 @@ BL_INLINE uint32_t sraw(Ctx& c, uint32_t s, uint32_t n) {
   return (uint32_t)(v >> n);
 }
 
-BL_INLINE double roundSingle(double v) { return (double)(float)v; }
+// Results of FP arithmetic. FPSCR[NI] (non-IEEE mode; OSInit always sets it with
+// PPCSetFpNonIEEEMode) makes the FPU return a denormalized result as a zero of the same sign.
+// Done here rather than with the host's MXCSR flush-to-zero, which would also change host code on
+// guest threads and the exact conversions of lfs/stfs/psq_l/psq_st.
+constexpr uint32_t kFpscrNI = 0x4;  // FPSCR bit 29
+BL_INLINE double roundDouble(Ctx& c, double v) {
+  uint64_t u;
+  memcpy(&u, &v, 8);
+  if (c.fpscr & kFpscrNI) u &= (u & 0x7FF0000000000000ull) ? ~0ull : 0x8000000000000000ull;
+  return asF64(u);
+}
+BL_INLINE double roundSingle(Ctx& c, double v) {
+  uint32_t b = f32Bits((float)v);
+  if (c.fpscr & kFpscrNI) b &= (b & 0x7F800000u) ? ~0u : 0x80000000u;
+  return asF32(b);
+}
 
 BL_INLINE uint64_t fctiw(Ctx& c, double v, bool truncate) {
   int32_t r;
@@ -196,7 +211,7 @@ BL_INLINE uint64_t fctiw(Ctx& c, double v, bool truncate) {
 }
 
 BL_INLINE double fsel(double a, double t, double f) { return a >= 0.0 ? t : f; }
-BL_INLINE double fres(double v) { return roundSingle(1.0 / v); }
+BL_INLINE double fres(Ctx& c, double v) { return roundSingle(c, 1.0 / v); }
 BL_INLINE double frsqrte(double v) { return 1.0 / std::sqrt(v); }
 
 }  // namespace guest

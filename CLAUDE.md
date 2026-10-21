@@ -150,6 +150,9 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   number/logo/collar panels; ~10% of player meshes). mtspr WPAR (GXResetWriteGatherPipe, before each
   RW display list) drops a partial burst.
 - The game cancels and re-creates threads in the same OSThread struct: the scheduler retires the old record.
+- OSInit sets FPSCR[NI] (non-IEEE mode): denormal FP results become signed zero. The generated code does
+  this per result (ctx.h roundSingle/roundDouble take the Ctx), not with MXCSR flush-to-zero, so host
+  code and lfs/stfs/psq conversions stay exact; new threads inherit the main thread's FPSCR.
 - Windows timer resolution is raised to 1 ms at startup (retrace pacing), and the process opts out of
   power throttling: Windows 11 otherwise ignores the 1 ms request for a window that is not the visible
   foreground one, and every sleep becomes 15.6 ms (20 fps, audio interrupts serviced late).
