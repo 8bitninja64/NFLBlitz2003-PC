@@ -13,3 +13,4 @@
 0x8000518C memset
 0x801A7EA8 __OSInitAudioSystem
 0x80194204 CARDGetSectorSize   # reads CARDControl.sectorSize (+0xC)
+0x8010A41C MoviePlay

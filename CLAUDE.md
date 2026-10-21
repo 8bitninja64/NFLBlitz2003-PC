@@ -20,7 +20,9 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   `recomp.py` (codegen → build/recomp_gen: 32 chunk files, recomp_funcs.h, recomp_table.cpp).
 - `tools/sdkid/` — SDK/MusyX/MSL signature matching → `config/sdk_symbols.txt` (+ `sdk_data_symbols.txt`);
   hand overrides in `config/sdk_symbols_manual.txt`, extra names in `config/symbols.txt`.
-- `config/hooks.txt` — functions replaced by `HLE(name)` in `src/runtime/hle_*.cpp`.
+- `config/hooks.txt` — functions replaced by `HLE(name)` in `src/runtime/hle_*.cpp`. `?<name|addr> = X` is a
+  pre-hook: the function is still translated but first calls HLE_X with r0 = 0 and returns if X set r0 = 1
+  (hle_movie.cpp skips logo.pss/povlogo.pss at boot: skip_logos setting).
 - `src/runtime/`:
   - ctx.h (guest Ctx, BE memory access, MMIO slow path for ea >= 0xCC000000, trace macros), cpu.cpp
     (indirect calls, SPRs, rfi, paired-single quantization), memory.cpp (MMIO dispatch).

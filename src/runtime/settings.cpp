@@ -32,6 +32,7 @@ static void applySetting(const std::string& key, const std::string& v) {
   else if (key == "backend") s.backend = v;
   else if (key == "resolution_scale") s.resolutionScale = (float)atof(v.c_str());
   else if (key == "show_fps") s.showFps = parseBool(v);
+  else if (key == "skip_logos") s.skipLogos = parseBool(v);
   else if (key == "texture_packs") s.texturePacks = parseBool(v);
   else if (key == "dump_textures") s.dumpTextures = parseBool(v);
   else if (key == "window_width") s.windowWidth = atoi(v.c_str());
@@ -98,6 +99,7 @@ void save() {
   out << "# NFL Blitz 2003 PC settings\n"
       << "\n[game]\n"
       << "disc = " << s.disc << "   # your NFL Blitz 2003 (USA) disc image\n"
+      << "skip_logos = " << (s.skipLogos ? "on" : "off") << "   # skip the logo movies at boot\n"
       << "\n[display]\n"
       << "widescreen = " << (s.widescreen ? "on" : "off") << "   # Hor+ 3D at the window's aspect ratio\n"
       << "hud = " << (s.hud == Hud2D::Stretched ? "stretched" : "centered") << "   # 2D screens: centered | stretched\n"
