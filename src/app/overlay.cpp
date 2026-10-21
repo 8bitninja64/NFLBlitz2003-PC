@@ -195,7 +195,7 @@ void drawSettings() {
         ImGui::EndCombo();
       }
       changed |= ImGui::Checkbox("Show FPS counter", &st.showFps);
-      changed |= ImGui::Checkbox("Skip logo movies at start", &st.skipLogos);
+      changed |= ImGui::Checkbox("Skip intro movies at start", &st.skipLogos);
       ImGui::Separator();
       ImGui::TextDisabled("Applied on the next start:");
       int msaa = st.msaa == 8 ? 3 : st.msaa == 4 ? 2 : st.msaa == 2 ? 1 : 0;

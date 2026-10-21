@@ -6,7 +6,7 @@ import struct
 import sys
 from collections import Counter
 
-AURORA_SIZES = {0x30: 34, 0x31: 23, 0x35: 16, 0x36: 13, 0x37: 8, 0x42: 1}
+AURORA_SIZES = {0x30: 34, 0x31: 23, 0x34: 8, 0x35: 16, 0x36: 13, 0x37: 8, 0x42: 1}
 
 
 def field(v, bits, shift):

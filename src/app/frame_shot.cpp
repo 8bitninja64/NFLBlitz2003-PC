@@ -24,6 +24,8 @@ std::set<uint64_t> g_wanted, g_pending;
 AuroraReadbackStream g_stream = 0;
 alignas(32) uint8_t g_copyKeys[8][32];  // unique "destinations" (copy identities)
 std::vector<uint8_t> g_buf;
+AuroraReadbackStream g_zStream = 0;
+uint32_t g_zCount = 0;
 
 uint32_t crc32(const uint8_t* p, size_t n, uint32_t c = 0) {
   c = ~c;
@@ -119,10 +121,33 @@ void capture(uint64_t frame) {
   GXCopyTex(key, GX_FALSE);
   AuroraReadbackCopySrc src{frame, key};
   if (AuroraReadbackCaptureCopies(g_stream, &src, 1)) g_pending.insert(frame);
+  // BLITZ_PEEKZ="x,y;x,y;...": also log the EFB depth (24-bit, as GXPeekZ) at these points.
+  if (const char* pz = getenv("BLITZ_PEEKZ")) {
+    static AuroraReadbackStream zs = AuroraReadbackCreateStream();
+    std::vector<AuroraReadbackPeekRequest> req;
+    for (const char* q = pz; q && *q; q = strchr(q, ';') ? strchr(q, ';') + 1 : nullptr) {
+      unsigned x = 0, y = 0;
+      if (sscanf(q, "%u,%u", &x, &y) == 2) req.push_back({req.size(), AURORA_READBACK_PEEK_Z, (u16)x, (u16)y});
+    }
+    if (!req.empty()) AuroraReadbackCapturePeeks(zs, req.data(), (u32)req.size());
+    g_zStream = zs;
+    g_zCount = (uint32_t)req.size();
+  }
   else LOG_WARN("frame shot %llu: readback unavailable (MSAA must be off: BLITZ_SET=msaa=1)", (unsigned long long)frame);
 }
 
 void poll() {
+  if (g_zStream && g_zCount) {
+    std::vector<uint32_t> z(g_zCount);
+    std::vector<AuroraReadbackDest> dests(g_zCount);
+    for (uint32_t i = 0; i < g_zCount; i++) dests[i] = {i, &z[i], sizeof(uint32_t), GX_FALSE};
+    if (AuroraReadbackGet(g_zStream, dests.data(), g_zCount)) {
+      std::string line;
+      for (uint32_t i = 0; i < g_zCount; i++) line += " " + (dests[i].found ? std::to_string(z[i] / 16777215.0) : std::string("-"));
+      LOG_INFO("peek z:%s", line.c_str());
+      g_zCount = 0;
+    }
+  }
   if (g_pending.empty()) return;
   for (auto it = g_pending.begin(); it != g_pending.end();) {
     AuroraReadbackDest dest{*it, g_buf.data(), (u32)g_buf.size(), GX_FALSE};

@@ -1,5 +1,5 @@
 // Movie playback (the game's own movie player): a pre-hook on its play function skips the
-// Midway and Point of View logo movies at boot when skip_logos is on (settings.ini / F1).
+// Midway and Point of View logos and the football intro (intro.pss) when skip_logos is on.
 #include "hle.h"
 #include "log.h"
 #include "settings.h"
@@ -16,7 +16,7 @@ HLE(MoviePlay) {
     if (!ch) break;
     name += (char)std::tolower((unsigned char)ch);
   }
-  if ((name == "logo.pss" || name == "povlogo.pss") && settings::get().skipLogos) {
+  if ((name == "logo.pss" || name == "povlogo.pss" || name == "intro.pss") && settings::get().skipLogos) {
     LOG_INFO("skipping movie %s", name.c_str());
     hle::ret(c, 0);
     c.r[0] = 1;  // handled: the player does not run

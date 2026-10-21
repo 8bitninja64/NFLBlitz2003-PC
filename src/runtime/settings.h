@@ -12,7 +12,7 @@ enum class Hud2D { Centered, Stretched };
 
 struct Settings {
   std::string disc;  // path of the user's disc image (remembered after the first pick)
-  bool skipLogos = true;  // skip the Midway and Point of View logo movies at boot
+  bool skipLogos = true;  // skip the logo movies and the football intro at boot
   // Display
   bool widescreen = true;      // Hor+ 3D at the window's aspect ratio
   Hud2D hud = Hud2D::Centered;  // 2D (orthographic) screens: 4:3 centered or stretched

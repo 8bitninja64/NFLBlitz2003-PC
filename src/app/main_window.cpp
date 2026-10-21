@@ -292,7 +292,42 @@ static bool buildModule(const std::string& dolPath, const std::string& outPath) 
 }
 #endif
 
+// Aurora's persistent shader caches (pipeline_cache.db, dawn_cache.db) do not notice when the
+// shader generator changes, so a new build could keep using shaders from an older one (players
+// lost helmets and jersey panels that way). Clear them whenever this executable changes.
+static void invalidateShaderCachesOnUpdate(const std::string& dir) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+#ifdef _WIN32
+  wchar_t exe[MAX_PATH];
+  GetModuleFileNameW(nullptr, exe, MAX_PATH);
+  fs::path self(exe);
+#else
+  fs::path self = fs::read_symlink("/proc/self/exe", ec);
+#endif
+  auto size = fs::file_size(self, ec);
+  auto time = fs::last_write_time(self, ec).time_since_epoch().count();
+  std::string stamp = std::to_string(size) + ":" + std::to_string(time);
+  fs::path stampFile = fs::u8path(dir) / "shader_cache.stamp";
+  std::string old;
+  if (FILE* f = fopen(stampFile.string().c_str(), "rb")) {
+    char buf[64] = {};
+    old.assign(buf, fread(buf, 1, sizeof(buf) - 1, f));
+    fclose(f);
+  }
+  if (old == stamp) return;
+  for (const char* name : {"pipeline_cache.db", "pipeline_cache.db-shm", "pipeline_cache.db-wal", "dawn_cache.db",
+                           "dawn_cache.db-shm", "dawn_cache.db-wal"})
+    fs::remove(fs::u8path(dir) / name, ec);
+  if (FILE* f = fopen(stampFile.string().c_str(), "wb")) {
+    fwrite(stamp.data(), 1, stamp.size(), f);
+    fclose(f);
+  }
+  LOG_INFO("new build: cleared the shader caches");
+}
+
 int main(int argc, char** argv) {
+  invalidateShaderCachesOnUpdate(userDataDir());
   settings::load(userDataDir() + "/settings.ini");
   settings::Settings& st = settings::get();
   guest::BootOptions boot;

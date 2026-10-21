@@ -99,7 +99,7 @@ void save() {
   out << "# NFL Blitz 2003 PC settings\n"
       << "\n[game]\n"
       << "disc = " << s.disc << "   # your NFL Blitz 2003 (USA) disc image\n"
-      << "skip_logos = " << (s.skipLogos ? "on" : "off") << "   # skip the logo movies at boot\n"
+      << "skip_logos = " << (s.skipLogos ? "on" : "off") << "   # skip the logo movies and the football intro at boot\n"
       << "\n[display]\n"
       << "widescreen = " << (s.widescreen ? "on" : "off") << "   # Hor+ 3D at the window's aspect ratio\n"
       << "hud = " << (s.hud == Hud2D::Stretched ? "stretched" : "centered") << "   # 2D screens: centered | stretched\n"

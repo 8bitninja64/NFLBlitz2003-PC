@@ -112,6 +112,12 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   experiment is replayed at every start, so delete it when debugging shader/state crashes.
 
 ## Gotchas
+- Aurora's pipeline_cache.db / dawn_cache.db are not invalidated when its shader generator changes: a
+  stale cache gave team-select players missing helmets and a hole above the jersey number. The app
+  clears both when the executable changes (shader_cache.stamp). When a GX experiment looks wrong for no
+  reason, re-encode the state under another cache key (e.g. an unused swap field) to test for this.
+- Per-draw debugging: `BLITZ_GX_PAINT=<n>` (draw n of each frame white/opaque), `BLITZ_GX_DRAWBP=<n>:<reg>=<v>;...`
+  (BP overrides for one draw), `BLITZ_PEEKZ=x,y;...` (EFB depth at the BLITZ_SHOT frame).
 - Aurora fixes live in patches/aurora/*.patch (tools/build.ps1 applies them; the submodule stays at
   upstream). 0001: @invariant vertex position: overlays drawn on the same vertices with LEQUAL
   (jersey names/numbers, face details, helmet shine) z-failed between shader variants.
