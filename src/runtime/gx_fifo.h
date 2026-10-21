@@ -34,5 +34,6 @@ struct Attr {
 };
 void vertexLayout(uint32_t vat, Attr out[kNumAttrs]);
 uint32_t vertexSize(uint32_t vat);
+uint32_t vatReg(int group, uint32_t vat);  // CP VAT A/B/C (group 0-2) of a vertex format
 
 }  // namespace gxfifo

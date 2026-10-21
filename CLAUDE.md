@@ -90,6 +90,13 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   drops register loads (bisecting state bugs).
 - `BLITZ_MEMWATCH=1` logs (and saves to build/leakframe.bin) any frame whose processing grows the process
   by > 256 MB. `BLITZ_GX_NOTEX` / `BLITZ_GX_NOCOPY` drop texture binds / EFB copies (bisecting).
+- `BLITZ_SHOT=<frame>,...|<a>-<b>/<step>` saves the finished EFB (640x480 + alpha image) of those frames to
+  build/shots through Aurora's copy readback: no window capture, works covered/background. Needs
+  `BLITZ_SET=msaa=1`. `tools/shotsheet.py <out.png> [div] [alpha]` makes a contact sheet,
+  `tools/crop.ps1` zooms. Frame numbers are presented frames (the same counter as BLITZ_GX_DUMP).
+- Bisecting draws: `BLITZ_GX_SKIPFMT=<texfmt>`, `BLITZ_GX_SKIPBLEND=<hex>`, `BLITZ_GX_BPREPL=reg:val:new`,
+  `BLITZ_GX_XFAND=addr:mask`, `BLITZ_GX_LOGBP=f6,fe`, `BLITZ_GX_FSDEBUG` (full-screen 2D decisions),
+  `BLITZ_GX_NRMSTATS`. `tools/ddssheet.py` sheets Aurora texture dumps (dump_textures=on).
 - `BLITZ_MENU_AT=<s>` opens the F1 menu after N seconds, `BLITZ_MENU_TAB=Controls` picks its tab (screenshots).
 - `BLITZ_GX_RING=<n>` keeps the last n translated frames; creating build/gxdump.trigger writes them to
   build/ring and dumps the next frame's textures + TLUTs. `tools/brightscan.py` uses it to catch the
@@ -118,8 +125,10 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   the bridge snapshots arrays per draw (memcmp against the last copy) and TLUTs at load time into a
   per-frame arena (BLITZ_GX_HAZARD=1 reports guest memory changing between uses). Textures are still
   read in place (rarely changed mid-frame).
-- Widescreen with centered 2D: the game's full-screen orthographic "clear" quad (draw 0, writes alpha 0)
-  only covers the 4:3 middle, so EFB alpha outside it keeps the copy-clear value.
+- Widescreen with centered 2D: a 2D draw whose own vertices span the whole width is drawn with the
+  game's unscaled projection when it covers a 3D scene (fades, the play-start flash) or is a clear quad
+  (depth ALWAYS + write); tiled 2D art and HUD stay 4:3. Aurora ignores partial projection writes:
+  always emit XF 0x1020-0x1026 as one block.
 - Discs are read through nod (aurora::dvd's dependency): ISO, RVZ, WIA, CISO, GCZ, NFS.
 - Don't write C/C++ with escapes through bash heredocs/python-in-bash; use the Write/Edit tools.
 

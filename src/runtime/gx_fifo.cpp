@@ -355,6 +355,8 @@ void vertexLayout(uint32_t vat, Attr out[kNumAttrs]) {
     set(kAttrTex0 + t, field(g_vcdHi, 2, 2 * t), (texCnt[t] ? 2 : 1) * compSize(texFmt[t]), 1);
 }
 
+uint32_t vatReg(int group, uint32_t vat) { return g_vat[group][vat & 7]; }
+
 uint32_t vertexSize(uint32_t vat) {
   Attr attrs[kNumAttrs];
   vertexLayout(vat, attrs);

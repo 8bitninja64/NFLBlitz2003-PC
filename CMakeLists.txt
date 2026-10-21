@@ -66,7 +66,7 @@ target_link_libraries(blitz_headless PRIVATE blitz_runtime aurora::gx aurora::vi
 # The game: Aurora window, GX via gx_bridge.
 add_library(blitz_gx OBJECT src/runtime/gx_bridge.cpp)
 target_link_libraries(blitz_gx PUBLIC blitz_runtime aurora::core aurora::gx aurora::vi aurora::pad)
-add_executable(blitz src/app/main_window.cpp src/app/overlay.cpp)
+add_executable(blitz src/app/main_window.cpp src/app/overlay.cpp src/app/frame_shot.cpp)
 add_dependencies(blitz blitz_game)
 target_link_libraries(blitz PRIVATE blitz_gx blitz_runtime aurora::main)
 target_include_directories(blitz PRIVATE extern/aurora/lib)

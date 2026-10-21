@@ -5,6 +5,7 @@
 #include "gx_bridge.h"
 #include "hw.h"
 #include "log.h"
+#include "frame_shot.h"
 #include "overlay.h"
 #include "pad_input.h"
 #include "sched.h"
@@ -362,6 +363,7 @@ int main(int argc, char** argv) {
   }
 
   gxbridge::init();
+  frameshot::init();
   initAudio();
   hw::start();
   std::thread([] { sched::runMainThread(guest::g_boot.entry); }).detach();
@@ -410,6 +412,8 @@ int main(int argc, char** argv) {
       static const bool memWatch = getenv("BLITZ_MEMWATCH") != nullptr;  // leak hunting
       size_t before = memWatch ? processMemory() : 0;
       if (haveFrame && !empty) GXCallDisplayList(frame.data(), (u32)frame.size());
+      if (haveFrame && !holding) frameshot::capture(consumedFrames);
+      frameshot::poll();
       overlay::draw(fps, consumedFrames);
       // Once the FIFO is processed Aurora holds its own copies of everything it read from
       // guest memory: let the game build its next frame while this one is presented.

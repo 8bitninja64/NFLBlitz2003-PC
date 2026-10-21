@@ -12,6 +12,7 @@
 #include <xxhash.h>
 
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -105,6 +106,14 @@ private:
   void bp(uint32_t v, const uint8_t* raw);
   void xf(const uint8_t* p, uint32_t size);
   uint32_t m_projType = 0;  // last XF 0x1026 (0 perspective, 1 orthographic)
+  // Widescreen with centered 2D: full-screen 2D draws (fades, flashes, clears) still cover the
+  // whole screen. Needs the guest's position matrices and unpatched projection.
+  uint32_t m_xfMtx[0x100] = {};  // XF matrix memory 0x000-0x0FF (position/texture matrices)
+  uint32_t m_proj[7] = {};       // XF 0x1020-0x1026 as the game wrote them
+  uint32_t m_mtxIdxA = 0;        // XF 0x1018
+  bool m_frameHas3d = false;     // a perspective draw happened earlier in this frame
+  bool isFullScreen2d(const uint8_t* p, uint32_t count, const gxfifo::Attr* attrs, uint32_t vat);
+  void putProjX(float scale);
   void cp(uint8_t reg, uint32_t v, const uint8_t* raw);
   void draw(const uint8_t* p, uint32_t size);
   void indexedXf(const uint8_t* p);
@@ -148,7 +157,7 @@ private:
   bool m_dumpTextures = false;
   uint64_t m_arrayBytes = 0, m_arrayLoads = 0;  // per frame
   uint64_t m_invalidates = 0, m_invalidatedBytes = 0;
-  uint32_t m_bp41 = 0, m_bpF3 = 0, m_bp42 = 0, m_bp43 = 0;
+  uint32_t m_bp40 = 0, m_bp41 = 0, m_bpF3 = 0, m_bp42 = 0, m_bp43 = 0;
   std::unordered_map<uint64_t, uint32_t> m_blendHist;
   std::deque<std::pair<uint32_t, std::vector<uint8_t>>> m_ring;  // BLITZ_GX_RING
   // BLITZ_GX_HAZARD: memory a draw referenced that changed before Aurora reads it.
@@ -307,6 +316,29 @@ void Bridge::bp(uint32_t v, const uint8_t* raw) {
     putRaw(raw, 5);
     return;
   }
+  // BLITZ_GX_BPREPL=<reg>:<value>:<replacement>[,...]: substitute BP register values (debugging).
+  static const char* bpRepl = getenv("BLITZ_GX_BPREPL");
+  if (bpRepl) {
+    for (const char* q = bpRepl; q && *q; q = strchr(q, ',') ? strchr(q, ',') + 1 : nullptr) {
+      unsigned r = 0, from = 0, to = 0;
+      if (sscanf(q, "%x:%x:%x", &r, &from, &to) == 3 && r == reg && (v & 0xFFFFFF) == from) {
+        uint32_t nv = reg << 24 | (to & 0xFFFFFF);
+        const uint8_t fixed[5] = {0x61, (uint8_t)(nv >> 24), (uint8_t)(nv >> 16), (uint8_t)(nv >> 8), (uint8_t)nv};
+        return bp(nv, fixed);
+      }
+    }
+  }
+  // BLITZ_GX_LOGBP=f6,fe,...: log writes to these BP registers (first 200).
+  static const char* logBp = getenv("BLITZ_GX_LOGBP");
+  if (logBp) {
+    static int logged = 0;
+    char key[8];
+    snprintf(key, sizeof(key), "%02x", reg);
+    if (logged < 200 && strstr(logBp, key)) {
+      logged++;
+      LOG_INFO("GX BP %02X = %06X", reg, v & 0xFFFFFF);
+    }
+  }
   switch (reg) {
   case 0x64: m_tlutSrc = v; return;  // TLUT load source (Aurora gets LOAD_TLUT instead)
   case 0x65: {
@@ -342,6 +374,7 @@ void Bridge::bp(uint32_t v, const uint8_t* raw) {
       return;
     }
     break;
+  case 0x40: m_bp40 = v & 0xFFFFFF; break;
   case 0x41: m_bp41 = v & 0xFFFFFF; break;
   case 0xF3: m_bpF3 = v & 0xFFFFFF; break;
   case 0x42: m_bp42 = v & 0xFFFFFF; break;
@@ -404,6 +437,14 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
   // BLITZ_GX_SKIPBLEND=<hex>: drop draws whose blend mode (BP 0x41 low 16 bits) matches (debugging).
   static const long skipBlend = getenv("BLITZ_GX_SKIPBLEND") ? strtol(getenv("BLITZ_GX_SKIPBLEND"), nullptr, 16) : -1;
   if (skipBlend >= 0 && (long)(m_bp41 & 0xFFFF) == skipBlend) return;
+  // BLITZ_GX_SKIPFMT=<fmt>[,...]: drop draws whose texture map 0 has this format (debugging).
+  static const char* skipFmt = getenv("BLITZ_GX_SKIPFMT");
+  if (skipFmt) {
+    char key[8];
+    snprintf(key, sizeof(key), ",%u,", field(m_tex[0].image0, 4, 20));
+    std::string list = std::string(",") + skipFmt + ",";
+    if (list.find(key) != std::string::npos) return;
+  }
   flushTextures();
   // BLITZ_BLEND_LOG: per-frame histogram of (blend mode BP 0x41, alpha compare BP 0xF3, pixel format BP 0x43).
   static const bool blendLog = getenv("BLITZ_BLEND_LOG") != nullptr;
@@ -440,10 +481,96 @@ void Bridge::draw(const uint8_t* p, uint32_t size) {
       uint32_t stride = m_arrays[arr].stride;
       uint32_t elem = stride ? stride : 4;
       ensureArray(arr, maxIndex[arr] * stride + elem);
+      static const bool nrmStats = getenv("BLITZ_GX_NRMSTATS") != nullptr;  // debugging
+      if (nrmStats && arr == 1 && stride >= 12) {
+        static int logged = 0;
+        if (logged < 40) {
+          logged++;
+          float mn = 1e9f, mx = 0;
+          for (uint32_t k = 0; k <= maxIndex[1] && k < 64; k++) {
+            const uint8_t* e = hostPhys(m_arrays[1].base + k * stride);
+            float c[3];
+            for (int j = 0; j < 3; j++) {
+              uint32_t bits = be32(e + 4 * j);
+              memcpy(&c[j], &bits, 4);
+            }
+            float len = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+            mn = len < mn ? len : mn, mx = len > mx ? len : mx;
+          }
+          LOG_INFO("GX normals: draw of %u verts, array %08X stride %u, |n| %.3f..%.3f", count, m_arrays[1].base, stride, mn, mx);
+        }
+      }
       if (hazard) noteUse(arr, m_arrays[arr].base, maxIndex[arr] * stride + elem);
     }
   }
+  const settings::Settings& st = settings::get();
+  bool stretch = st.widescreen && st.hud == settings::Hud2D::Centered && m_projType == 1 &&
+                 isFullScreen2d(p, count, attrs, vat);
+  if (m_projType == 0) m_frameHas3d = true;
+  if (!stretch) {
+    putRaw(p, size);
+    return;
+  }
+  putProjX(1.0f);
   putRaw(p, size);
+  putProjX((4.0f / 3.0f) / settings::g_displayAspect.load());
+}
+
+// A 2D draw over the whole 640-wide screen whose job is to cover it: a fade/flash over the 3D
+// scene, or a clear quad (depth test "always" with depth writes). Pure 2D screens stay 4:3.
+bool Bridge::isFullScreen2d(const uint8_t* p, uint32_t count, const gxfifo::Attr* attrs, uint32_t vat) {
+  const gxfifo::Attr& pos = attrs[gxfifo::kAttrPos];
+  uint32_t vatA = gxfifo::vatReg(0, vat);
+  if (pos.type != 1 || field(vatA, 3, 1) != 4 || attrs[0].type) return false;  // direct F32, one matrix
+  bool clearLike = (m_bp40 & 0x1F) == 0x1F;  // enabled, ALWAYS, update
+  if (!m_frameHas3d && !clearLike) return false;
+  uint32_t offset = 0, stride = 0;
+  for (int i = 0; i < gxfifo::kNumAttrs; i++) {
+    if (i < gxfifo::kAttrPos) offset += attrs[i].size;
+    stride += attrs[i].size;
+  }
+  auto f32 = [](uint32_t bits) {
+    float f;
+    memcpy(&f, &bits, 4);
+    return f;
+  };
+  const uint32_t* m = &m_xfMtx[(m_mtxIdxA & 63) * 4];
+  float p0 = f32(m_proj[0]), p1 = f32(m_proj[1]);
+  int comps = field(vatA, 1, 0) ? 3 : 2;
+  float lo = 1e9f, hi = -1e9f;
+  const uint8_t* v = p + 3 + offset;
+  for (uint32_t n = 0; n < count; n++, v += stride) {
+    float x = f32(be32(v)), y = f32(be32(v + 4)), z = comps == 3 ? f32(be32(v + 8)) : 0.0f;
+    float ex = f32(m[0]) * x + f32(m[1]) * y + f32(m[2]) * z + f32(m[3]);
+    float cx = p0 * ex + p1;
+    lo = cx < lo ? cx : lo;
+    hi = cx > hi ? cx : hi;
+  }
+  static const bool dbg = getenv("BLITZ_GX_FSDEBUG") != nullptr;
+  if (dbg && count >= 4 && !clearLike && hi - lo > 1.5f && (m_bp41 & 0xFFFF) != 0x04BD) {
+    static int logged = 0;
+    if (logged++ < 300)
+      LOG_INFO("2D draw n=%u blend %04X 3d=%d clear=%d mtx %u x %.3f..%.3f p0 %f p1 %f m0 %f m3 %f", count, m_bp41 & 0xFFFF,
+               m_frameHas3d, clearLike, m_mtxIdxA & 63, lo, hi, p0, p1, f32(m[0]), f32(m[3]));
+  }
+  return lo <= -0.98f && hi >= 0.98f;
+}
+
+// Re-emits the projection with its horizontal terms scaled by `scale` (1 = the game's own).
+// Aurora only accepts the whole 7-register block.
+void Bridge::putProjX(float scale) {
+  put8(0x10);
+  put32(0x00061020);
+  for (int i = 0; i < 7; i++) {
+    uint32_t bits = m_proj[i];
+    if (i < 2) {
+      float f;
+      memcpy(&f, &bits, 4);
+      f *= scale;
+      memcpy(&bits, &f, 4);
+    }
+    put32(bits);
+  }
 }
 
 void Bridge::indexedXf(const uint8_t* p) {
@@ -453,6 +580,9 @@ void Bridge::indexedXf(const uint8_t* p) {
   ensureArray(arr, index * m_arrays[arr].stride + len * 4);
   static const bool hazard = getenv("BLITZ_GX_HAZARD") != nullptr;
   if (hazard) noteUse(arr, m_arrays[arr].base + index * m_arrays[arr].stride, len * 4);
+  uint32_t addr = (uint32_t)(p[3] & 0x0F) << 8 | p[4];
+  const uint8_t* src = hostPhys(m_arrays[arr].base + index * m_arrays[arr].stride);
+  for (uint32_t k = 0; k < len && addr + k < 0x100; k++) m_xfMtx[addr + k] = be32(src + 4 * k);
   putRaw(p, 5);
 }
 
@@ -475,6 +605,26 @@ static bool dropped(const uint8_t* p) {
 void Bridge::xf(const uint8_t* p, uint32_t size) {
   uint32_t header = be32(p + 1);
   uint32_t first = header & 0xFFFF, count = (header >> 16) + 1;
+  // BLITZ_GX_XFAND=<addr>:<mask>[,...]: AND XF register values with a mask (debugging).
+  static const char* xfAnd = getenv("BLITZ_GX_XFAND");
+  if (xfAnd) {
+    static std::vector<uint8_t> patched;
+    patched.assign(p, p + size);
+    for (const char* q = xfAnd; q && *q; q = strchr(q, ',') ? strchr(q, ',') + 1 : nullptr) {
+      unsigned addr = 0, mask = 0;
+      if (sscanf(q, "%x:%x", &addr, &mask) != 2 || addr < first || addr >= first + count) continue;
+      uint8_t* w = patched.data() + 5 + 4 * (addr - first);
+      uint32_t val = be32(w) & mask;
+      w[0] = (uint8_t)(val >> 24), w[1] = (uint8_t)(val >> 16), w[2] = (uint8_t)(val >> 8), w[3] = (uint8_t)val;
+    }
+    p = patched.data();
+  }
+  for (uint32_t k = 0; k < count && 5 + 4 * k + 4 <= size; k++) {
+    uint32_t addr = first + k, val = be32(p + 5 + 4 * k);
+    if (addr < 0x100) m_xfMtx[addr] = val;
+    else if (addr >= 0x1020 && addr <= 0x1026) m_proj[addr - 0x1020] = val;
+    else if (addr == 0x1018) m_mtxIdxA = val;
+  }
   const settings::Settings& st = settings::get();
   bool touchesProj = first <= 0x1026 && first + count > 0x1020;
   if (!touchesProj || !st.widescreen) {
@@ -643,6 +793,7 @@ void Bridge::endFrame() {
   // Aurora starts each frame with fresh caches.
   // Aurora has consumed the frame: its snapshots can be reused.
   m_arena.reset();
+  m_frameHas3d = false;
   for (TlutCopy& c : m_tlutCopies) c.data = nullptr;
   for (Array& a : m_arrays) a.snapshot = nullptr, a.emittedSize = 0;
   for (TexMap& t : m_tex) t.dirty = true;
