@@ -234,7 +234,8 @@ class FuncGen:
             E(f'{{ uint32_t a_ = {R(ra)}; {R(rd)} = {hx(i.imm)} - a_; c.ca = (uint64_t)(uint32_t)~a_ + {hx(i.imm)} + 1 > 0xFFFFFFFFull; }}')
             return
         if op == 'mulli':
-            E(f'{R(rd)} = (uint32_t)((int32_t){R(ra)} * {i.imm});')
+            # Low 32 bits of the product are the same signed or unsigned; unsigned wraps (int32 overflow is UB).
+            E(f'{R(rd)} = {R(ra)} * {hx(i.imm)};')
             return
         if op == 'cmpi':
             E(f'c.cr[{i.crf}] = guest::cmpS(c, (int32_t){R(ra)}, {i.imm});')
@@ -277,7 +278,7 @@ class FuncGen:
             return
         arith = {
             'add': '{a} + {b}', 'subf': '{b} - {a}', 'neg': '0u - {a}',
-            'mullw': '(uint32_t)((int32_t){a} * (int32_t){b})',
+            'mullw': '{a} * {b}',  # unsigned: wraps like the hardware (see mulli)
             'mulhw': '(uint32_t)(((int64_t)(int32_t){a} * (int64_t)(int32_t){b}) >> 32)',
             'mulhwu': '(uint32_t)(((uint64_t){a} * (uint64_t){b}) >> 32)',
             'divw': 'guest::divwS((int32_t){a}, (int32_t){b})',
