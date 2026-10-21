@@ -4,7 +4,7 @@
 #include "hle.h"
 #include "hw.h"
 #include "log.h"
-#include "sched.h"
+#include "guest_sched.h"
 
 #include <cstdio>
 #include <cstdlib>

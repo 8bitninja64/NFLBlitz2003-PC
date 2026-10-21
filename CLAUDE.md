@@ -79,6 +79,15 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - Screenshots: `tools/capture_window.ps1 -Seconds N -Out build/x.png` (sets BLITZ_TOPMOST; a covered
   window captures as white) or `tools/capture_screen.ps1`.
 
+## Linux
+- `tools/build_linux.sh [dir]` (Ubuntu/WSL; clang + Ninja): NFLBlitz2003 + blitz_game.so (dlopen'd from
+  the executable's directory; built with -Bsymbolic/hidden visibility). blitz_headless is not built by
+  default on Linux (GNU ld + circular Aurora static deps). User data: ~/.local/share/NFL Blitz 2003.
+- src/runtime/guest_sched.h was sched.h: on Linux it shadowed the system <sched.h> (pthread.h).
+- Tested in WSL (Ubuntu 26.04): runs at 60 fps with GALLIUM_DRIVER=d3d12 LD_LIBRARY_PATH=/usr/lib/wsl/lib
+  (Dawn OpenGL ES backend); WSL has no GPU Vulkan here and Mesa's software GL (llvmpipe) crashes in
+  Dawn pipeline creation. BLITZ_SHOT readback does not work on the GL backend.
+
 ## Debugging
 - `BLITZ_WATCHDOG=<s>`: per-thread last functions + loop back-edge, guest back-chain stacks, GX stats.
   Host crashes are logged with the same traces (crash filter in log.cpp).

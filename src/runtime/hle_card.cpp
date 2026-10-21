@@ -2,7 +2,7 @@
 // complete immediately on the host; async callbacks run as interrupts.
 #include "hle.h"
 #include "log.h"
-#include "sched.h"
+#include "guest_sched.h"
 
 #include <aurora/card.h>
 #include <dolphin/card.h>

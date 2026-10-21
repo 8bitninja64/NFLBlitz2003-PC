@@ -4,7 +4,7 @@
 #include "hw.h"
 #include "log.h"
 #include "memory.h"
-#include "sched.h"
+#include "guest_sched.h"
 #include "settings.h"
 #include "widescreen.h"
 

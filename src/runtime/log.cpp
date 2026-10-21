@@ -2,7 +2,7 @@
 
 #include "ctx.h"
 #include "gx_fifo.h"
-#include "sched.h"
+#include "guest_sched.h"
 
 #include <chrono>
 #include <cstdarg>

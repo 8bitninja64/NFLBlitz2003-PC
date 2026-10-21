@@ -8,7 +8,7 @@
 #include "frame_shot.h"
 #include "overlay.h"
 #include "pad_input.h"
-#include "sched.h"
+#include "guest_sched.h"
 #include "settings.h"
 
 #include "gx/fifo.hpp"  // Aurora internal: fifo::drain

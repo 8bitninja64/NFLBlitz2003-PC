@@ -9,7 +9,7 @@
 
 #include "hle.h"
 #include "hw.h"
-#include "sched.h"
+#include "guest_sched.h"
 #include "settings.h"
 
 #include <array>

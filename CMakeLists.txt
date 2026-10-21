@@ -15,6 +15,11 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   target_compile_options(blitz_game PRIVATE -Wno-unused-label -Wno-unused-variable -Wno-unreachable-code
     -Wno-parentheses-equality -Wno-tautological-compare)
 endif()
+if (NOT WIN32)
+  # blitz_game.so like blitz_game.dll; its runtime-facing names (guest::g_mem ...) stay its own.
+  set_target_properties(blitz_game PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
+  target_link_options(blitz_game PRIVATE -Wl,-Bsymbolic)
+endif()
 
 set(BLITZ_RUNTIME_SOURCES
   src/runtime/audio_out.cpp
@@ -64,8 +69,11 @@ endif()
 
 # Headless runner: no graphics/audio, for bring-up of CPU/OS/HLE.
 add_executable(blitz_headless src/app/main_headless.cpp)
+if (NOT WIN32)
+  set_target_properties(blitz_headless PROPERTIES EXCLUDE_FROM_ALL TRUE)  # GNU ld: circular Aurora deps
+endif()
 add_dependencies(blitz_headless blitz_game)
-target_link_libraries(blitz_headless PRIVATE blitz_runtime aurora::gx aurora::vi)
+target_link_libraries(blitz_headless PRIVATE blitz_runtime aurora::gx aurora::vi aurora::core)
 
 # The game: Aurora window, GX via gx_bridge.
 add_library(blitz_gx OBJECT src/runtime/gx_bridge.cpp)
@@ -74,14 +82,17 @@ add_executable(blitz src/app/main_window.cpp src/app/overlay.cpp src/app/frame_s
 add_dependencies(blitz blitz_game)
 target_link_libraries(blitz PRIVATE blitz_gx blitz_runtime aurora::main)
 target_include_directories(blitz PRIVATE extern/aurora/lib)
+set_target_properties(blitz PROPERTIES OUTPUT_NAME "NFLBlitz2003")
 if (WIN32)
   target_link_libraries(blitz PRIVATE comdlg32 psapi)
-  set_target_properties(blitz PROPERTIES OUTPUT_NAME "NFLBlitz2003")
+  # Shared libraries (Dawn, DXC, SDL3, ...) next to the executable.
+  add_custom_command(TARGET blitz POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:blitz> $<TARGET_FILE_DIR:blitz>
+    COMMAND_EXPAND_LISTS)
+else()
+  # Find the game module and shared libraries next to the executable.
+  set_target_properties(blitz blitz_headless PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
 endif()
-# Shared libraries (Dawn, DXC, SDL3, ...) next to the executable.
-add_custom_command(TARGET blitz POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:blitz> $<TARGET_FILE_DIR:blitz>
-  COMMAND_EXPAND_LISTS)
 file(GLOB BLITZ_EXTRA_DLLS "${CMAKE_BINARY_DIR}/_deps/dawn_prebuilt-src/bin/*.dll")
 if (BLITZ_EXTRA_DLLS)
   add_custom_command(TARGET blitz POST_BUILD

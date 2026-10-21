@@ -2,7 +2,7 @@
 #include "boot.h"
 #include "hle.h"
 #include "log.h"
-#include "sched.h"
+#include "guest_sched.h"
 
 #include <chrono>
 #include <condition_variable>

@@ -1,7 +1,7 @@
 // Guest thread scheduler: one host thread per guest thread, a single "guest CPU"
 // token (g_running), priority scheduling at the same points the SDK would switch
 // (sleep, wakeup, resume, suspend, exit, interrupt return), and interrupt delivery.
-#include "sched.h"
+#include "guest_sched.h"
 
 #include "boot.h"
 #include "func_table.h"

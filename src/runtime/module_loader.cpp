@@ -13,6 +13,9 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#else
+#include <dlfcn.h>
+#include <unistd.h>
 #endif
 
 namespace guest {
@@ -25,6 +28,8 @@ static const GameModule* g_module = nullptr;
 static std::vector<Fn> g_hleTable;
 #ifdef _WIN32
 static HMODULE g_lib = nullptr;
+#else
+static void* g_lib = nullptr;
 #endif
 
 static RuntimeApi makeApi() {
@@ -59,7 +64,11 @@ std::string defaultModulePath() {
   size_t slash = s.find_last_of("\\/");
   return (slash == std::string::npos ? std::string(".") : s.substr(0, slash)) + "/blitz_game.dll";
 #else
-  return "./blitz_game.so";
+  char buf[4096];
+  ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+  std::string s(buf, n > 0 ? (size_t)n : 0);
+  size_t slash = s.find_last_of('/');
+  return (slash == std::string::npos ? std::string(".") : s.substr(0, slash)) + "/blitz_game.so";
 #endif
 }
 
@@ -72,12 +81,20 @@ bool loadGameModule(const std::string& path, std::string* error) {
   }
   auto init = reinterpret_cast<ModuleInitFn>(GetProcAddress(lib, kModuleInitSymbol));
 #else
-  ModuleInitFn init = nullptr;
+  void* lib = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (!lib) {
+    const char* why = dlerror();
+    *error = "cannot load the game module '" + path + "' (" + (why ? why : "?") + ")";
+    return false;
+  }
+  auto init = reinterpret_cast<ModuleInitFn>(dlsym(lib, kModuleInitSymbol));
 #endif
   if (!init) {
     *error = "'" + path + "' is not a game module";
 #ifdef _WIN32
     FreeLibrary(lib);
+#else
+    dlclose(lib);
 #endif
     return false;
   }
@@ -91,6 +108,8 @@ bool loadGameModule(const std::string& path, std::string* error) {
     *error = msg;
 #ifdef _WIN32
     FreeLibrary(lib);
+#else
+    dlclose(lib);
 #endif
     return false;
   };
@@ -101,9 +120,7 @@ bool loadGameModule(const std::string& path, std::string* error) {
     if (!g_hleTable[i]) missing += std::string(missing.empty() ? "" : ", ") + mod->hleNames[i];
   }
   if (!missing.empty()) return reject("the runtime lacks host functions the game module needs: " + missing);
-#ifdef _WIN32
   g_lib = lib;
-#endif
   g_module = mod;
   g_funcTable = mod->table;
   g_funcTableSize = mod->tableSize;
@@ -123,8 +140,10 @@ void unloadGameModule() {
   g_entryPoint = 0;
 #ifdef _WIN32
   FreeLibrary(g_lib);
-  g_lib = nullptr;
+#else
+  dlclose(g_lib);
 #endif
+  g_lib = nullptr;
 }
 
 const char* moduleDolHash() { return g_module ? g_module->dolHash : ""; }
