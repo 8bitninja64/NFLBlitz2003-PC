@@ -47,6 +47,8 @@ jobs:
           sudo apt-get install -y ninja-build clang python3 libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
             libxi-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libegl-dev libgl-dev \
             libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libdrm-dev libgbm-dev libusb-1.0-0-dev
+      - name: Aurora patches
+        run: for p in patches/aurora/*.patch; do git -C extern/aurora apply --ignore-whitespace "$PWD/$p"; done
       - name: Build runtime
         run: |
           cmake -S . -B build/linux-clang -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \

@@ -9,6 +9,13 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 disc=${1:-"$root/NFL Blitz 2003 (USA).iso"}
 bdir=${2:-"$root/build/linux-clang"}
 cd "$root"
+# Local fixes to Aurora (patches/aurora/*.patch), applied once to the submodule checkout.
+for patch in patches/aurora/*.patch; do
+  [ -f "$patch" ] || continue
+  git -C extern/aurora apply --ignore-whitespace --reverse --check "$root/$patch" 2>/dev/null && continue
+  git -C extern/aurora apply --ignore-whitespace "$root/$patch" || { echo "cannot apply $patch to extern/aurora" >&2; exit 1; }
+  echo "applied $patch"
+done
 if [ ! -f orig/main.dol ]; then
   [ -f "$disc" ] || { echo "disc image not found: $disc" >&2; exit 1; }
   python3 -I tools/gcdisc.py "$disc" orig --dol-only
