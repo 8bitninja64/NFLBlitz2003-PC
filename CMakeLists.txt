@@ -9,16 +9,20 @@ set(BLITZ_GEN_DIR "${CMAKE_SOURCE_DIR}/build/recomp_gen" CACHE PATH "Recompiler 
 file(GLOB BLITZ_GEN_SOURCES CONFIGURE_DEPENDS "${BLITZ_GEN_DIR}/*.cpp")
 
 # The game module: code recompiled from the user's disc, loaded by the executable at run time.
-add_library(blitz_game SHARED ${BLITZ_GEN_SOURCES} src/runtime/module_rt.cpp)
-target_include_directories(blitz_game PRIVATE src/runtime "${BLITZ_GEN_DIR}")
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  target_compile_options(blitz_game PRIVATE -Wno-unused-label -Wno-unused-variable -Wno-unreachable-code
-    -Wno-parentheses-equality -Wno-tautological-compare)
-endif()
-if (NOT WIN32)
-  # blitz_game.so like blitz_game.dll; its runtime-facing names (guest::g_mem ...) stay its own.
-  set_target_properties(blitz_game PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
-  target_link_options(blitz_game PRIVATE -Wl,-Bsymbolic)
+# Without generated sources (a fresh clone, CI) only the runtime is built; the module is compiled
+# from the player's disc (tools/build.ps1, tools/make_module.ps1, tools/build_linux.sh).
+if (BLITZ_GEN_SOURCES)
+  add_library(blitz_game SHARED ${BLITZ_GEN_SOURCES} src/runtime/module_rt.cpp)
+  target_include_directories(blitz_game PRIVATE src/runtime "${BLITZ_GEN_DIR}")
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(blitz_game PRIVATE -Wno-unused-label -Wno-unused-variable -Wno-unreachable-code
+      -Wno-parentheses-equality -Wno-tautological-compare)
+  endif()
+  if (NOT WIN32)
+    # blitz_game.so like blitz_game.dll; its runtime-facing names (guest::g_mem ...) stay its own.
+    set_target_properties(blitz_game PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
+    target_link_options(blitz_game PRIVATE -Wl,-Bsymbolic)
+  endif()
 endif()
 
 set(BLITZ_RUNTIME_SOURCES
@@ -72,14 +76,18 @@ add_executable(blitz_headless src/app/main_headless.cpp)
 if (NOT WIN32)
   set_target_properties(blitz_headless PROPERTIES EXCLUDE_FROM_ALL TRUE)  # GNU ld: circular Aurora deps
 endif()
-add_dependencies(blitz_headless blitz_game)
+if (TARGET blitz_game)
+  add_dependencies(blitz_headless blitz_game)
+endif()
 target_link_libraries(blitz_headless PRIVATE blitz_runtime aurora::gx aurora::vi aurora::core)
 
 # The game: Aurora window, GX via gx_bridge.
 add_library(blitz_gx OBJECT src/runtime/gx_bridge.cpp)
 target_link_libraries(blitz_gx PUBLIC blitz_runtime aurora::core aurora::gx aurora::vi aurora::pad)
 add_executable(blitz src/app/main_window.cpp src/app/overlay.cpp src/app/frame_shot.cpp)
-add_dependencies(blitz blitz_game)
+if (TARGET blitz_game)
+  add_dependencies(blitz blitz_game)
+endif()
 target_link_libraries(blitz PRIVATE blitz_gx blitz_runtime aurora::main)
 target_include_directories(blitz PRIVATE extern/aurora/lib)
 set_target_properties(blitz PROPERTIES OUTPUT_NAME "NFLBlitz2003")
