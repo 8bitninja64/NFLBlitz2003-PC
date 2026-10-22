@@ -146,6 +146,10 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   back to the section list (never closes); choosing a section moves it into the section's options
   (Focus::Content via SetKeyboardFocusHere). Disc section: pickDisc + guest disc check (GO3E5D), saved to
   settings, Restart now (update::restart drops a --disc argument).
+- Disc memory is per game folder: settings.ini (shared by every copy, %APPDATA%) keeps disc + disc_for
+  (the game folder it was chosen for); another folder shows the picker (opening at the last disc's
+  folder). The window app never guesses "NFL Blitz 2003 (USA).iso" by name (BootOptions::findByName);
+  the disc is remembered as soon as it opens (discOpened), before the first-start compile.
 - Synthesized arrow keys in tests need KEYEVENTF_EXTENDEDKEY, else Windows sends numpad keys (numpad
   2/4/6/8 are the C-stick here). Real arrow keys reach ImGui.
 

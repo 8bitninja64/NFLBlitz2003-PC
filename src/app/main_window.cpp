@@ -205,6 +205,31 @@ static std::string userDataDir() {
   return dir;
 }
 
+// The game's folder (UTF-8): the remembered disc belongs to one copy of the game.
+static std::string programFolder() {
+  std::error_code ec;
+#ifdef _WIN32
+  wchar_t buf[MAX_PATH];
+  DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+  std::filesystem::path dir = std::filesystem::path(std::wstring(buf, n)).parent_path();
+#else
+  std::filesystem::path dir = std::filesystem::read_symlink("/proc/self/exe", ec).parent_path();
+#endif
+  auto u8 = dir.u8string();
+  return std::string(reinterpret_cast<const char*>(u8.c_str()), u8.size());
+}
+
+// The folder of the last disc image chosen (by any copy of the game), where the picker opens.
+static std::string lastDiscFolder() {
+  const std::string& disc = settings::get().disc;
+  if (disc.empty()) return {};
+  std::error_code ec;
+  auto dir = std::filesystem::u8path(disc).parent_path();
+  if (!std::filesystem::is_directory(dir, ec)) return {};
+  auto u8 = dir.u8string();
+  return std::string(reinterpret_cast<const char*>(u8.c_str()), u8.size());
+}
+
 static AuroraBackend backendFromSettings(const std::string& name) {
   if (name == "vulkan") return BACKEND_VULKAN;
   if (name == "d3d12") return BACKEND_D3D12;
@@ -302,6 +327,9 @@ static std::string pickDisc() {
                     L"*.iso;*.gcm;*.rvz;*.wia;*.ciso;*.gcz;*.nfs\0All files\0*.*\0";
   ofn.lpstrFile = file;
   ofn.nMaxFile = MAX_PATH;
+  // Opens where the last disc image was (another copy of the game, or before it moved).
+  std::wstring startDir = widen(lastDiscFolder());
+  if (!startDir.empty()) ofn.lpstrInitialDir = startDir.c_str();
   ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
   return GetOpenFileNameW(&ofn) ? narrow(file) : std::string();
 }
@@ -358,15 +386,25 @@ static std::string exeDir() {
 // The desktop's file chooser (zenity on GNOME, SteamOS and most others; kdialog on KDE).
 static bool g_noChooser = false;
 
+// Single-quoted for /bin/sh.
+static std::string shellQuote(const std::string& s) {
+  std::string q = "'";
+  for (char c : s) q += c == '\'' ? std::string("'\\''") : std::string(1, c);
+  return q + "'";
+}
+
 static std::string pickDisc() {
-  const char* cmds[] = {
+  // Opens where the last disc image was (another copy of the game, or before it moved).
+  const std::string dir = lastDiscFolder().empty() ? std::string(".") : lastDiscFolder();
+  const std::string cmds[] = {
       "zenity --file-selection --title='Select your NFL Blitz 2003 (USA) GameCube disc image' "
       "--file-filter='GameCube disc image | *.[iI][sS][oO] *.[gG][cC][mM] *.[rR][vV][zZ] *.[wW][iI][aA] "
-      "*.[cC][iI][sS][oO] *.[gG][cC][zZ] *.[nN][fF][sS]' --file-filter='All files | *' 2>/dev/null",
-      "kdialog --title 'Select your NFL Blitz 2003 (USA) GameCube disc image' "
-      "--getopenfilename . 'GameCube disc image (*.iso *.gcm *.rvz *.wia *.ciso *.gcz *.nfs)' 2>/dev/null"};
-  for (const char* cmd : cmds) {
-    FILE* p = popen(cmd, "r");
+      "*.[cC][iI][sS][oO] *.[gG][cC][zZ] *.[nN][fF][sS]' --file-filter='All files | *' --filename=" +
+          shellQuote(dir + "/") + " 2>/dev/null",
+      "kdialog --title 'Select your NFL Blitz 2003 (USA) GameCube disc image' --getopenfilename " + shellQuote(dir) +
+          " 'GameCube disc image (*.iso *.gcm *.rvz *.wia *.ciso *.gcz *.nfs)' 2>/dev/null"};
+  for (const std::string& cmd : cmds) {
+    FILE* p = popen(cmd.c_str(), "r");
     if (!p) continue;
     std::string out;
     char buf[512];
@@ -426,9 +464,25 @@ static bool chooseDisc(std::string* message) {
   std::error_code ec;
   auto u8 = std::filesystem::absolute(std::filesystem::u8path(path), ec).u8string();
   settings::get().disc = ec ? path : std::string(reinterpret_cast<const char*>(u8.c_str()), u8.size());
+  settings::get().discFor = programFolder();
   settings::save();
   LOG_INFO("disc for the next start: %s", settings::get().disc.c_str());
   return true;
+}
+
+// The disc that opened is remembered for this game folder right away (a first start that stops at
+// the compile prompt must not ask again). Not a BLITZ_DISC override.
+static void rememberDisc(const std::string& path) {
+  if (getenv("BLITZ_DISC")) return;
+  settings::Settings& st = settings::get();
+  std::error_code ec;
+  auto u8 = std::filesystem::absolute(std::filesystem::u8path(path), ec).u8string();
+  std::string abs(reinterpret_cast<const char*>(u8.c_str()), u8.size());
+  if (!ec && (abs != st.disc || st.discFor != programFolder())) {
+    st.disc = abs;
+    st.discFor = programFolder();
+    settings::save();
+  }
 }
 
 // Aurora's persistent shader caches (pipeline_cache.db, dawn_cache.db) do not notice when the
@@ -473,21 +527,17 @@ int main(int argc, char** argv) {
   settings::load(userDataDir() + "/settings.ini");
   settings::Settings& st = settings::get();
   guest::BootOptions boot;
-  boot.rememberedDisc = st.disc;
+  // The remembered disc counts only for the game folder it was chosen for: settings.ini is shared by
+  // every copy of the game, and a new copy should ask (its picker opens at the last disc's folder).
+  // No guessing a disc by its file name either: the player picks it.
+  boot.rememberedDisc = st.discFor == programFolder() ? st.disc : std::string();
+  boot.findByName = false;
   boot.pickDisc = pickDisc;
+  boot.discOpened = rememberDisc;
   boot.showError = showError;
   boot.buildModule = buildModule;
   boot.userDir = userDataDir();
   if (!guest::bootFromArgs(argc, argv, &boot)) return 1;
-  if (!getenv("BLITZ_DISC")) {
-    std::error_code ec;
-    auto u8 = std::filesystem::absolute(std::filesystem::u8path(boot.chosenDisc), ec).u8string();
-    std::string abs(reinterpret_cast<const char*>(u8.c_str()), u8.size());
-    if (!ec && abs != st.disc) {
-      st.disc = abs;
-      settings::save();
-    }
-  }
 
   AuroraConfig config{};
   config.appName = "NFL Blitz 2003";

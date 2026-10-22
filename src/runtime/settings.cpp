@@ -23,6 +23,7 @@ static bool parseBool(const std::string& v) { return v == "1" || v == "true" || 
 static void applySetting(const std::string& key, const std::string& v) {
   Settings& s = g_settings;
   if (key == "disc") s.disc = v;
+  else if (key == "disc_for") s.discFor = v;
   else if (key == "widescreen") s.widescreen = parseBool(v);
   else if (key == "hud") s.hud = v == "stretched" ? Hud2D::Stretched : Hud2D::Centered;
   else if (key == "stretch_menus") s.stretchMenus = parseBool(v);
@@ -102,6 +103,7 @@ void save() {
   out << "# NFL Blitz 2003 PC settings\n"
       << "\n[game]\n"
       << "disc = " << s.disc << "   # your NFL Blitz 2003 (USA) disc image\n"
+      << "disc_for = " << s.discFor << "   # the game folder it was chosen for (another folder asks again)\n"
       << "skip_logos = " << (s.skipLogos ? "on" : "off") << "   # skip the logo movies and the football intro at boot\n"
       << "cheats = " << std::hex << s.cheats << std::dec << "   # F1 > Cheats (bit = the game's cheat id)\n"
       << "update_check = " << (s.updateCheck ? "on" : "off") << "   # look for a new release at startup (F1 > Update)\n"

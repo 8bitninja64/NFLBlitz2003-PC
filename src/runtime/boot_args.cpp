@@ -118,8 +118,9 @@ bool bootFromArgs(int argc, char** argv, BootOptions* opts) {
   }
   if (const char* d = getenv("BLITZ_DISC")) discPath = d;
   const char* kDefault = "NFL Blitz 2003 (USA).iso";
-  std::string candidates[] = {discPath, opts ? opts->rememberedDisc : std::string(), kDefault,
-                              exeDir() + "/" + kDefault};
+  const bool byName = !opts || opts->findByName;
+  std::string candidates[] = {discPath, opts ? opts->rememberedDisc : std::string(), byName ? kDefault : "",
+                              byName ? exeDir() + "/" + kDefault : std::string()};
   discPath.clear();
   for (const std::string& cand : candidates)
     if (fileExists(cand)) {
@@ -142,6 +143,7 @@ bool bootFromArgs(int argc, char** argv, BootOptions* opts) {
     return false;
   }
   if (opts) opts->chosenDisc = discPath;
+  if (opts && opts->discOpened) opts->discOpened(discPath);  // remembered even if the first start stops later
   LOG_INFO("disc: %s", discPath.c_str());
 
   initMemory();

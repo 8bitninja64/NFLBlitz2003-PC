@@ -12,6 +12,7 @@ enum class Hud2D { Centered, Stretched };
 
 struct Settings {
   std::string disc;  // path of the user's disc image (remembered after the first pick)
+  std::string discFor;  // the game folder `disc` was chosen for: another copy of the game asks again
   bool skipLogos = true;  // skip the logo movies and the football intro at boot
   uint64_t cheats = 0;    // the game's cheat ids switched on in the F1 menu (bit = id; cheats.h)
   bool updateCheck = true;  // look for a newer release on GitHub at startup (F1 > Update)
