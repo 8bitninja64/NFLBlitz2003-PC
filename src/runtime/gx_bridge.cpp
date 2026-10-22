@@ -184,6 +184,7 @@ private:
   uint32_t m_genMode = 0, m_bp40 = 0, m_bp41 = 0, m_bpF3 = 0, m_bp42 = 0, m_bp43 = 0;
   std::unordered_map<uint64_t, uint32_t> m_blendHist;
   std::deque<std::pair<uint32_t, std::vector<uint8_t>>> m_ring;  // BLITZ_GX_RING
+  std::string m_arrayLog;  // BLITZ_GX_DUMP: guest base + content hash of each array load, in stream order
   // BLITZ_GX_HAZARD: memory a draw referenced that changed before Aurora reads it.
   struct Use {
     uint64_t hash;
@@ -255,6 +256,13 @@ void Bridge::ensureArray(int i, uint32_t needed) {
   put64((uint64_t)(uintptr_t)a.snapshot);
   put32(size);
   put8(0);  // big-endian data
+  static const bool logArrays = getenv("BLITZ_GX_DUMP") != nullptr;
+  if (logArrays) {
+    char line[80];
+    snprintf(line, sizeof(line), "%d %08X %u %016llX\n", i, a.base, size,
+             (unsigned long long)XXH3_64bits(a.snapshot, needed));
+    m_arrayLog += line;
+  }
 }
 
 void Bridge::flushTextures() {
@@ -903,6 +911,11 @@ void Bridge::endFrame() {
       fclose(f);
       LOG_INFO("wrote %s (%zu bytes)", name, m_out.size());
     }
+    snprintf(name, sizeof(name), "build/gxarrays_%u.txt", frameNo);
+    if (FILE* f = fopen(name, "wb")) {
+      fwrite(m_arrayLog.data(), 1, m_arrayLog.size(), f);
+      fclose(f);
+    }
     // ...and guest MEM1 at the end of the frame (offline geometry checks).
     snprintf(name, sizeof(name), "build/gxmem_%u.bin", frameNo);
     if (FILE* f = fopen(name, "wb")) {
@@ -912,6 +925,7 @@ void Bridge::endFrame() {
   }
   // BLITZ_GX_RING=<n>: keep the last n streams; creating build/gxdump.trigger writes them out
   // (build/ring/gxframe_N.bin) and dumps the next frame's textures. Catches rare effects.
+  m_arrayLog.clear();
   static const int ringSize = getenv("BLITZ_GX_RING") ? atoi(getenv("BLITZ_GX_RING")) : 0;
   bool ringTriggered = false;
   if (ringSize > 0) {

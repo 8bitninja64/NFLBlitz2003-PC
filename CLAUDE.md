@@ -156,7 +156,9 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - `BLITZ_PERF=1` logs guest vs handoff time per frame and Aurora begin/process/end times.
 - `BLITZ_PEEK=addr,...` guest words in each watchdog dump. `BLITZ_XFB_DUMP=<retrace>[,n]` XFB → PPM
   (`tools/ppm2png.py`). `BLITZ_GX_DUMP=<frame>` translated stream → build/gxframe_N.bin
-  (`tools/gxdump.py [--all]`) plus bound textures (`tools/tex2png.py`). `BLITZ_GX_DROP=bp59,xf1018,...`
+  (`tools/gxdump.py [--all]`) plus bound textures (`tools/tex2png.py`); `<frame>,<count>` dumps a run,
+  each with build/gxarrays_N.txt (array guest base + content hash per load). `tools/gxpair.py` matches
+  consecutive frames' draws (frame interpolation study: docs/INTERPOLATION_RESEARCH.md). `BLITZ_GX_DROP=bp59,xf1018,...`
   drops register loads (bisecting state bugs).
 - `BLITZ_MEMWATCH=1` logs (and saves to build/leakframe.bin) any frame whose processing grows the process
   by > 256 MB. `BLITZ_GX_NOTEX` / `BLITZ_GX_NOCOPY` drop texture binds / EFB copies (bisecting).
