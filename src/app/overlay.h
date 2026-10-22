@@ -8,6 +8,7 @@ struct Actions {
   void (*applyDisplay)();      // widescreen / HUD / resolution changed
   void (*setVolume)(float gain);
   void (*quit)();
+  void (*restartAfterUpdate)();  // start the newly installed version, then quit
 };
 
 void init(const Actions& actions);  // after aurora_initialize (loads the menu fonts)

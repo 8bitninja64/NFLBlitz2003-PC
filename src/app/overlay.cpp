@@ -2,6 +2,7 @@
 
 #include "cheats.h"
 #include "settings.h"
+#include "update_check.h"
 
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_scancode.h>
@@ -233,8 +234,8 @@ void loadFonts() {
 unsigned short g_padHeld = 0, g_padPrev = 0;
 bool g_holdInput = false;  // after the menu toggled: pads stay away from the game until released
 int g_section = 0;  // the selected menu section
-enum Section { kDisplay, kAudio, kControls, kCheats, kAbout, kSectionCount };
-const char* kSectionNames[kSectionCount] = {"Display", "Audio", "Controls", "Cheats", "About"};
+enum Section { kDisplay, kAudio, kControls, kCheats, kUpdate, kAbout, kSectionCount };
+const char* kSectionNames[kSectionCount] = {"Display", "Audio", "Controls", "Cheats", "Update", "About"};
 
 void feedNav() {
   ImGuiIO& io = ImGui::GetIO();
@@ -364,6 +365,62 @@ void drawAbout(settings::Settings& st) {
   ImGui::TextWrapped("Settings: %s", settings::path().c_str());
 }
 
+// Update: this version, the latest GitHub release, and installing it (update_check.h).
+void drawUpdate(settings::Settings& st, bool* changed) {
+  update::Release r = update::checkStatus();
+  update::Install in = update::installStatus();
+  ImGui::Text("This version: %s", update::version());
+  ImGui::Spacing();
+  switch (r.state) {
+  case update::Release::Idle: ImGui::TextDisabled("Not checked yet."); break;
+  case update::Release::Checking: ImGui::Text("Checking GitHub for a new release..."); break;
+  case update::Release::UpToDate:
+    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1), "Up to date (latest release: %s).", r.latest.c_str());
+    break;
+  case update::Release::NoReleases: ImGui::TextDisabled("No release has been published yet."); break;
+  case update::Release::Failed: ImGui::TextColored(kRed, "Could not check: %s", r.error.c_str()); break;
+  case update::Release::Available: ImGui::TextColored(kGold, "%s is available.", r.latest.c_str()); break;
+  }
+  ImGui::Spacing();
+  const bool busy = in.state == update::Install::Downloading || in.state == update::Install::Verifying ||
+                    in.state == update::Install::Extracting || in.state == update::Install::Installing;
+  if (r.state == update::Release::Available && in.state != update::Install::Done) {
+    std::string why;
+    if (update::canInstall(r, why)) {
+      ImGui::BeginDisabled(busy);
+      if (ImGui::Button(("Download and install " + r.latest).c_str())) update::installStart(r);
+      ImGui::EndDisabled();
+    } else {
+      ImGui::TextWrapped("It cannot be installed here (%s).", why.c_str());
+      if (ImGui::Button("Open the release page")) update::openPage(r.page);
+    }
+  }
+  if (busy) {
+    const char* step = in.state == update::Install::Downloading  ? "Downloading"
+                       : in.state == update::Install::Verifying  ? "Checking the download"
+                       : in.state == update::Install::Extracting ? "Unpacking"
+                                                                 : "Installing";
+    ImGui::Text("%s...", step);
+    ImGui::ProgressBar(in.state == update::Install::Downloading ? in.fraction : 1.0f, ImVec2(-1, 0));
+  }
+  if (in.state == update::Install::Failed) ImGui::TextColored(kRed, "The update failed: %s", in.error.c_str());
+  if (in.state == update::Install::Done) {
+    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1), "%s is installed. Restart to play it.", r.latest.c_str());
+    if (ImGui::Button("Restart now") && g_actions.restartAfterUpdate) g_actions.restartAfterUpdate();
+  }
+  if (!busy && r.state != update::Release::Checking && in.state != update::Install::Done) {
+    if (ImGui::Button("Check now")) update::checkStart();
+  }
+  ImGui::Spacing();
+  ImGui::Separator();
+  *changed |= ImGui::Checkbox("Check for updates when the game starts", &st.updateCheck);
+  if (!r.notes.empty() && r.state == update::Release::Available) {
+    ImGui::Spacing();
+    ImGui::TextDisabled("Release notes");
+    ImGui::TextWrapped("%s", r.notes.c_str());
+  }
+}
+
 void hint(const char* button, ImVec4 color, const char* action) {
   ImGui::TextColored(color, "%s", button);
   ImGui::SameLine(0, 4);
@@ -439,6 +496,7 @@ void drawSettings() {
   case kAudio: changed |= drawAudio(st); break;
   case kControls: drawControls(); break;
   case kCheats: changed |= drawCheats(st); break;
+  case kUpdate: drawUpdate(st, &changed); break;
   case kAbout: drawAbout(st); break;
   }
   ImGui::PopItemWidth();
@@ -449,12 +507,29 @@ void drawSettings() {
   hint("B", kRed, "back");
   hint("L / R", kBlue, "section");
   hint("Z+Start / F1", kGold, "close");
-  float bw = ImGui::CalcTextSize("Quit game").x + ImGui::GetStyle().FramePadding.x * 2;
-  float rw = ImGui::CalcTextSize("Resume").x + ImGui::GetStyle().FramePadding.x * 2;
-  ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - bw - rw - ImGui::GetStyle().ItemSpacing.x);
+  // Update (highlighted when a newer release is out), Resume, Quit game (asks first).
+  const bool updateReady = update::checkStatus().state == update::Release::Available;
+  const char* updateLabel = updateReady ? "Update available" : "Update";
+  const ImGuiStyle& style = ImGui::GetStyle();
+  auto width = [&](const char* s) { return ImGui::CalcTextSize(s).x + style.FramePadding.x * 2; };
+  ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - width(updateLabel) - width("Resume") - width("Quit game") -
+                       style.ItemSpacing.x * 2);
+  if (updateReady) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.42f, 0.08f, 1.0f));
+  if (ImGui::Button(updateLabel)) g_section = kUpdate;
+  if (updateReady) ImGui::PopStyleColor();
+  ImGui::SameLine();
   if (ImGui::Button("Resume")) g_open = false;
   ImGui::SameLine();
-  if (ImGui::Button("Quit game") && g_actions.quit) g_actions.quit();
+  if (ImGui::Button("Quit game")) ImGui::OpenPopup("Quit?");
+  if (ImGui::BeginPopupModal("Quit?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
+    ImGui::Text("Quit NFL Blitz 2003?");
+    ImGui::Spacing();
+    if (ImGui::Button("Quit", ImVec2(120, 0)) && g_actions.quit) g_actions.quit();
+    ImGui::SameLine();
+    ImGui::SetItemDefaultFocus();
+    if (ImGui::Button("Cancel", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
   ImGui::End();
   if (changed) settings::save();
 }

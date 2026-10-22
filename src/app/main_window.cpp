@@ -6,6 +6,7 @@
 #include "hw.h"
 #include "log.h"
 #include "first_start.h"
+#include "update_check.h"
 #include "frame_shot.h"
 #include "overlay.h"
 #include "pad_input.h"
@@ -239,6 +240,14 @@ static size_t processMemory() {
 static bool g_quit = false;
 static void requestQuit() { g_quit = true; }
 
+// F1 > Update > Restart now: the newly installed executable starts with this one's arguments.
+static int g_argc = 0;
+static char** g_argv = nullptr;
+static void restartAfterUpdate() {
+  if (update::restart(g_argc, g_argv)) requestQuit();
+  else LOG_ERROR("could not start the updated game");
+}
+
 // Alt+Enter / F11: fullscreen. F1: settings menu (pauses). Esc: close the menu.
 static void handleHotkeys() {
   static bool wasDown = false, f1WasDown = false;
@@ -428,6 +437,9 @@ static void invalidateShaderCachesOnUpdate(const std::string& dir) {
 }
 
 int main(int argc, char** argv) {
+  g_argc = argc;
+  g_argv = argv;
+  update::cleanup();  // the files the last update replaced
   invalidateShaderCachesOnUpdate(userDataDir());
   settings::load(userDataDir() + "/settings.ini");
   settings::Settings& st = settings::get();
@@ -485,7 +497,8 @@ int main(int argc, char** argv) {
     auto group = aurora::texture::load_replacement_directory(packDir);
     (void)group;
   }
-  overlay::init({setFullscreen, applyDisplay, setVolume, requestQuit});
+  overlay::init({setFullscreen, applyDisplay, setVolume, requestQuit, restartAfterUpdate});
+  if (st.updateCheck && !getenv("BLITZ_NO_UPDATE_CHECK")) update::checkStart();
   if (getenv("BLITZ_TOPMOST")) SDL_SetWindowAlwaysOnTop(aurora_get_window(), true);  // for screenshots
   // Aurora's GX state defaults; the game's own GXInit stream then sets everything it uses.
   static uint8_t auroraFifo[0x40000];
@@ -532,6 +545,18 @@ int main(int argc, char** argv) {
     }
     if (exiting) break;
     handleHotkeys();
+    // Test hook (with BLITZ_UPDATE_API): install a found update and restart into it, no clicks.
+    if (static const bool autoUpdate = getenv("BLITZ_UPDATE_AUTOINSTALL") != nullptr; autoUpdate) {
+      static bool started = false, restarted = false;
+      if (!started && update::checkStatus().state == update::Release::Available) {
+        started = true;
+        update::installStart(update::checkStatus());
+      }
+      if (!restarted && update::installStatus().state == update::Install::Done) {
+        restarted = true;
+        restartAfterUpdate();
+      }
+    }
     if (const char* at = getenv("BLITZ_MENU_AT")) {  // test hook: open the menu after N seconds
       static bool opened = false;
       static const auto start = std::chrono::steady_clock::now();
@@ -589,9 +614,47 @@ int main(int argc, char** argv) {
     // Devices stop only once a frame is held: the game needs retraces to finish that frame.
     hw::g_paused.store(paused && holding);
     if (began) {
+      // Present game frames on the VI retrace tick (the game has already been released to build the
+      // next one): frames finished early or late in a period no longer shift the presentation, which
+      // otherwise swung between ~9 and ~27 ms apart around the 60 Hz average. With vsync the display
+      // paces instead.
+      static const bool tickPacing = !getenv("BLITZ_NO_TICK_PACING");
+      const bool shown = haveFrame && !paused;  // a new game frame (not the held one under the menu)
+      if (tickPacing && shown && !settings::get().vsync) {
+        const int64_t tick = hw::nextRetraceNs();
+        const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(clk::now().time_since_epoch()).count();
+        if (tick > now && tick - now < 40'000'000) {
+          // Sleep to ~1 ms before, then spin: sleeps alone are 1 ms coarse.
+          if (tick - now > 1'500'000) std::this_thread::sleep_for(std::chrono::nanoseconds(tick - now - 1'200'000));
+          while (std::chrono::duration_cast<std::chrono::nanoseconds>(clk::now().time_since_epoch()).count() < tick) {}
+        }
+      }
       auto t2 = clk::now();
       aurora_end_frame();
       auto t3 = clk::now();
+      // BLITZ_PERF: frame pacing once per second, measured at presentation: game frames shown, the
+      // longest gap between two and how many gaps exceeded 20 ms (a missed 60 Hz frame).
+      static const bool pacing = getenv("BLITZ_PERF") != nullptr;
+      if (pacing && shown) {
+        static clk::time_point last{}, secStart = clk::now();
+        static int n = 0, hitches = 0;
+        static double worst = 0;
+        auto now = clk::now();
+        if (last.time_since_epoch().count()) {
+          double gap = std::chrono::duration<double, std::milli>(now - last).count();
+          worst = std::max(worst, gap);
+          hitches += gap > 20.0;
+        }
+        last = now;
+        n++;
+        if (now - secStart >= std::chrono::seconds(1)) {
+          LOG_INFO("pacing: %d frames/s, longest gap %.1f ms, %d over 20 ms%s", n, worst, hitches,
+                   widescreen::inMatch() ? " (match)" : "");
+          n = hitches = 0;
+          worst = 0;
+          secStart = now;
+        }
+      }
       tBegin += std::chrono::duration<double, std::milli>(t1 - t0).count();
       tProc += std::chrono::duration<double, std::milli>(t2 - t1).count();
       tEnd += std::chrono::duration<double, std::milli>(t3 - t2).count();

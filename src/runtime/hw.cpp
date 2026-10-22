@@ -147,10 +147,15 @@ void startFastBoot(uint32_t untilFrame, uint32_t factor) {
   guest::setTimeWarp(factor);
 }
 
+static std::atomic<int64_t> g_nextRetraceNs{0};
+
+int64_t nextRetraceNs() { return g_nextRetraceNs.load(std::memory_order_relaxed); }
+
 static void viRetraceThread() {
   using namespace std::chrono;
   const auto period = nanoseconds(1001000000ll / 60);  // 59.94 Hz
   auto next = steady_clock::now() + period;
+  g_nextRetraceNs.store(duration_cast<nanoseconds>(next.time_since_epoch()).count());
   uint32_t context = guest::allocReserved(0x2C8);
   for (;;) {
     std::this_thread::sleep_until(next);
@@ -165,6 +170,7 @@ static void viRetraceThread() {
     }
     next += period / turbo;
     if (turbo > 1 && steady_clock::now() > next + milliseconds(50)) next = steady_clock::now();
+    g_nextRetraceNs.store(duration_cast<nanoseconds>(next.time_since_epoch()).count(), std::memory_order_relaxed);
     if (g_paused.load()) continue;  // the guest is held at a frame handoff (menu open)
     sched::postIrq([context](guest::Ctx& c) {
       maybeDumpXfb(retrace++);

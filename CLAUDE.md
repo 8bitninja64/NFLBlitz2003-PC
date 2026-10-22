@@ -123,6 +123,23 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - Quit: main ends with std::_Exit(0) after aurora_shutdown; returning ran static destructors under the
   still-running guest threads ("OSResumeThread: unknown thread" FATAL/abort on quit, both platforms).
 
+## Updates and frame pacing
+- F1 > Update (src/app/update_check.cpp, from NBA Hangtime's updater): GitHub latest release vs
+  BLITZ_VERSION (CMake; CI sets the tag), package NFLBlitz2003-windows-x64.zip / -linux-x64.tar.xz,
+  SHA-256 from the release asset's digest (none: no install), system tar (Linux: python3 fallback),
+  files swapped with *.old-update backups (rolled back on failure, removed next start), restart.
+  update_check=on in settings.ini checks at startup. Test: fake server + BLITZ_UPDATE_API=http://127.0.0.1:PORT
+  BLITZ_UPDATE_AUTOINSTALL=1 (Windows and WSL verified: install, restart, bad digest refused).
+  On Linux the package folder and the executable share the name NFLBlitz2003: check is_regular_file.
+- Pacing: frames are presented on the VI retrace tick (hw::nextRetraceNs; vsync off), which cut frames
+  >20 ms apart ~3-5x vs presenting when ready; occasional 33 ms frames remain (a frame missing its
+  tick: the host blocks the game while it converts the frame's GX). BLITZ_PERF logs "pacing:" per
+  second (frames, longest gap, gaps over 20 ms); BLITZ_NO_TICK_PACING=1 for A/B. Measure with a warm
+  shader cache (each new exe clears it: the first run stalls up to 1 s on pipeline compiles).
+- Above 60 fps: the game advances a fixed step per frame (RenderWare triple-buffer swap on the
+  retrace, no elapsed-time scaling): a faster VI only speeds the game up. Only host-side frame
+  interpolation (blending XF matrices between two game frames) could add frames: weeks of work.
+
 ## Debugging
 - `BLITZ_WATCHDOG=<s>`: per-thread last functions + loop back-edge, guest back-chain stacks, GX stats.
   Host crashes are logged with the same traces (crash filter in log.cpp).

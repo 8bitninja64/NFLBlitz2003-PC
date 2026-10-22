@@ -35,6 +35,7 @@ static void applySetting(const std::string& key, const std::string& v) {
   else if (key == "show_fps") s.showFps = parseBool(v);
   else if (key == "skip_logos") s.skipLogos = parseBool(v);
   else if (key == "cheats") s.cheats = strtoull(v.c_str(), nullptr, 16);
+  else if (key == "update_check") s.updateCheck = parseBool(v);
   else if (key == "texture_packs") s.texturePacks = parseBool(v);
   else if (key == "dump_textures") s.dumpTextures = parseBool(v);
   else if (key == "window_width") s.windowWidth = atoi(v.c_str());
@@ -103,6 +104,7 @@ void save() {
       << "disc = " << s.disc << "   # your NFL Blitz 2003 (USA) disc image\n"
       << "skip_logos = " << (s.skipLogos ? "on" : "off") << "   # skip the logo movies and the football intro at boot\n"
       << "cheats = " << std::hex << s.cheats << std::dec << "   # F1 > Cheats (bit = the game's cheat id)\n"
+      << "update_check = " << (s.updateCheck ? "on" : "off") << "   # look for a new release at startup (F1 > Update)\n"
       << "\n[display]\n"
       << "widescreen = " << (s.widescreen ? "on" : "off") << "   # Hor+ 3D at the window's aspect ratio\n"
       << "hud = " << (s.hud == Hud2D::Stretched ? "stretched" : "centered") << "   # in-match HUD/2D: centered | stretched\n"

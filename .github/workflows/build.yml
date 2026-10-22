@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+# The version the F1 menu's updater compares with the latest release: the tag for releases.
+env:
+  BLITZ_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
+
 jobs:
   windows:
     runs-on: windows-2022
@@ -46,7 +50,7 @@ jobs:
       - name: Build runtime (Ubuntu 22.04 container)
         run: |
           mkdir -p build/linux-release
-          docker run --rm -v "$PWD:/src" -v "$PWD/build/linux-release:/build" ubuntu:22.04 \
+          docker run --rm -e BLITZ_VERSION -v "$PWD:/src" -v "$PWD/build/linux-release:/build" ubuntu:22.04 \
             sh /src/tools/build_linux_release.sh /src /build
           sudo chown -R "$(id -u):$(id -g)" build extern
       - name: Zig (the first-start compiler the package carries)

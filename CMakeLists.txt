@@ -84,7 +84,22 @@ target_link_libraries(blitz_headless PRIVATE blitz_runtime aurora::gx aurora::vi
 # The game: Aurora window, GX via gx_bridge.
 add_library(blitz_gx OBJECT src/runtime/gx_bridge.cpp)
 target_link_libraries(blitz_gx PUBLIC blitz_runtime aurora::core aurora::gx aurora::vi aurora::pad)
-add_executable(blitz src/app/main_window.cpp src/app/overlay.cpp src/app/frame_shot.cpp)
+add_executable(blitz src/app/main_window.cpp src/app/overlay.cpp src/app/frame_shot.cpp src/app/update_check.cpp)
+# The version the updater compares with the latest GitHub release (CI passes the release tag).
+set(_blitz_version "dev")
+if (DEFINED ENV{BLITZ_VERSION} AND NOT "$ENV{BLITZ_VERSION}" STREQUAL "")
+  set(_blitz_version "$ENV{BLITZ_VERSION}")
+endif()
+set(BLITZ_VERSION "${_blitz_version}" CACHE STRING "Version of this build (a release tag such as v1.0)")
+target_compile_definitions(blitz PRIVATE BLITZ_VERSION="${BLITZ_VERSION}")
+# nlohmann/json (MIT) for the GitHub API answer: the official single header, checksum pinned.
+set(BLITZ_JSON_DIR "${CMAKE_BINARY_DIR}/_deps/nlohmann_json/include")
+if (NOT EXISTS "${BLITZ_JSON_DIR}/nlohmann/json.hpp")
+  file(DOWNLOAD https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
+       "${BLITZ_JSON_DIR}/nlohmann/json.hpp"
+       EXPECTED_HASH SHA256=9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6)
+endif()
+target_include_directories(blitz PRIVATE "${BLITZ_JSON_DIR}")
 if (TARGET blitz_game)
   add_dependencies(blitz blitz_game)
 endif()
@@ -95,7 +110,7 @@ if (NOT WIN32)
   target_sources(blitz PRIVATE src/app/first_start.cpp)
 endif()
 if (WIN32)
-  target_link_libraries(blitz PRIVATE comdlg32 psapi)
+  target_link_libraries(blitz PRIVATE comdlg32 psapi winhttp shell32)
   # Shared libraries (Dawn, DXC, SDL3, ...) next to the executable.
   add_custom_command(TARGET blitz POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:blitz> $<TARGET_FILE_DIR:blitz>

@@ -18,6 +18,10 @@ extern std::atomic<bool> g_paused;
 void startFastBoot(uint32_t untilFrame, uint32_t factor);
 extern std::atomic<uint32_t> g_framesBuilt;
 
+// The time (steady_clock nanoseconds) of the next VI retrace tick: the window presents each game
+// frame on a tick, as the hardware scans out the XFB, for an even 59.94 Hz cadence.
+int64_t nextRetraceNs();
+
 void init();   // register MMIO devices (before boot)
 void start();  // start device timers (VI retrace)
 uint32_t viFramebufferAddress();  // XFB the VI scans out (physical)
