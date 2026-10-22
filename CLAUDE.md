@@ -62,7 +62,7 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   (BLITZ_AUTO_BUILD=1 skips the question). `tools/package.ps1` makes dist/NFLBlitz2003 with the runtime,
   recompiler, config and module headers but no game code.
 - `src/app/main_window.cpp` (NFLBlitz2003.exe: Aurora window, audio, pads, hotkeys, disc picker, texture
-  packs), `overlay.cpp` (F1 ImGui settings menu, FPS counter), `main_headless.cpp` (blitz_headless.exe).
+  packs), `overlay.cpp` (Esc ImGui settings menu, FPS counter), `main_headless.cpp` (blitz_headless.exe).
 - `src/runtime/settings.*`: settings.ini in %APPDATA%/NFL Blitz 2003 (BLITZ_SET="k=v;k=v" overrides).
 
 ## Build / run
@@ -124,7 +124,7 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   still-running guest threads ("OSResumeThread: unknown thread" FATAL/abort on quit, both platforms).
 
 ## Updates and frame pacing
-- F1 > Update (src/app/update_check.cpp, from NBA Hangtime's updater): GitHub latest release vs
+- Menu > Update (src/app/update_check.cpp, from NBA Hangtime's updater): GitHub latest release vs
   BLITZ_VERSION (CMake; CI sets the tag), package NFLBlitz2003-windows-x64.zip / -linux-x64.tar.xz,
   SHA-256 from the release asset's digest (none: no install), system tar (Linux: python3 fallback),
   files swapped with *.old-update backups (rolled back on failure, removed next start), restart.
@@ -139,6 +139,15 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - Above 60 fps: the game advances a fixed step per frame (RenderWare triple-buffer swap on the
   retrace, no elapsed-time scaling): a faster VI only speeds the game up. Only host-side frame
   interpolation (blending XF matrices between two game frames) could add frames: weeks of work.
+
+## Settings menu (overlay.cpp)
+- Esc toggles it (main_window handleHotkeys; not while a key capture or popup wants Esc:
+  overlay::wantsEscape); controllers: Z+Start or the Back button. B / Backspace only moves the highlight
+  back to the section list (never closes); choosing a section moves it into the section's options
+  (Focus::Content via SetKeyboardFocusHere). Disc section: pickDisc + guest disc check (GO3E5D), saved to
+  settings, Restart now (update::restart drops a --disc argument).
+- Synthesized arrow keys in tests need KEYEVENTF_EXTENDEDKEY, else Windows sends numpad keys (numpad
+  2/4/6/8 are the C-stick here). Real arrow keys reach ImGui.
 
 ## Debugging
 - `BLITZ_WATCHDOG=<s>`: per-thread last functions + loop back-edge, guest back-chain stacks, GX stats.
@@ -172,7 +181,7 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - Bisecting draws: `BLITZ_GX_SKIPFMT=<texfmt>`, `BLITZ_GX_SKIPBLEND=<hex>`, `BLITZ_GX_BPREPL=reg:val:new`,
   `BLITZ_GX_XFAND=addr:mask`, `BLITZ_GX_LOGBP=f6,fe`, `BLITZ_GX_FSDEBUG` (full-screen 2D decisions),
   `BLITZ_GX_NRMSTATS`. `tools/ddssheet.py` sheets Aurora texture dumps (dump_textures=on).
-- `BLITZ_MENU_AT=<s>` opens the F1 menu after N seconds, `BLITZ_MENU_TAB=Controls` picks its tab (screenshots).
+- `BLITZ_MENU_AT=<s>` opens the settings menu after N seconds, `BLITZ_MENU_TAB=Controls` picks its tab (screenshots).
 - `BLITZ_GX_RING=<n>` keeps the last n translated frames; creating build/gxdump.trigger writes them to
   build/ring and dumps the next frame's textures + TLUTs. `tools/brightscan.py` uses it to catch the
   glare (it appears ~93 s into the soak script in roughly one run of three). Runs are not deterministic (same input script, different draw counts at the same frame),
@@ -249,12 +258,12 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   gameplay callers of RwCameraFrustumTestSphere (80203570 from 8002EF38 off-screen pass target and
   8006A464 off-screen catch-up), which FrustumTestForLogic swaps in. 3D particles (80112978) still cull
   in 4:3 screen space. BLITZ_NO_WIDECULL=1 for A/B.
-- Cheats (hle_cheats.cpp, F1 > Cheats, settings key cheats = hex mask of cheat ids): the game's own
+- Cheats (hle_cheats.cpp, Menu > Cheats, settings key cheats = hex mask of cheat ids): the game's own
   versus-screen codes. Table 0x80274A6C (0x1C: icon1-3, dpad, id, name, subtitle; 58 entries); active
   cheats are per-port masks at 0x80286040+0x64+port*8 (bit = id), cleared only in the front end. The
   MatchCheats pre-hook on match setup 8004A098 (return address 80033E24, not the attract demo) sets the
   menu's cheats on all ports; live-read ones are also written while the menu has the game paused.
-- F1 menu (overlay.cpp): pads drive it as ImGui keyboard navigation (overlay::padInput from PADRead,
+- Settings menu (overlay.cpp): pads drive it as ImGui keyboard navigation (overlay::padInput from PADRead,
   so GC adapters and SDL pads alike); Z+Start or a PC pad's Back button toggles it, and the game gets
   no pad input until the buttons are released (overlay::ownsPads). Fonts: system Segoe UI / DejaVu / Noto.
 - tools/package.ps1 -Zip: release archive (~17 MB; no game code).
@@ -272,12 +281,12 @@ RenderWare 801D13C8..80227364.
   in-game football with input and sound, locked 60 fps; a 6-minute random-input soak ran without
   game crashes (one diagnostics crash, fixed).
 - Modern features: Hor+ widescreen (2D centered or stretched), native-resolution rendering plus
-  resolution_scale (N x 480 lines), MSAA, anisotropy, Alt+Enter/F11 fullscreen, F1 ImGui settings
+  resolution_scale (N x 480 lines), MSAA, anisotropy, Alt+Enter/F11 fullscreen, Esc ImGui settings
   overlay that pauses the game, FPS counter, settings.ini, disc picker with remembered path.
 - Audio: AX command lists processed on the host (verified by recording, not yet by ear). Not modelled:
   polyphase SRC filter (cubic instead), ITD/HRTF, low-pass filter, compressor; the title is silent.
 - Memory card: detection, mount/check, directory and open work; writing a save not yet exercised.
-- Code split: blitz_game.dll (recompiled game) + runtime exe; F1 Controls tab rebinds keyboard keys.
+- Code split: blitz_game.dll (recompiled game) + runtime exe; menu Controls tab rebinds keyboard keys.
 - Glare (white field at the snap): the stadium-shadow pass (blend 0x2FD: dst*0.62 + dst*(1-dstA))
   brightened where the field's alpha was wrong because Aurora read reused vertex/palette memory late.
   Fixed by the bridge's snapshots: 0 glare frames in 6 scan runs (was ~1 in 3).

@@ -11,6 +11,7 @@
 #include "overlay.h"
 #include "pad_input.h"
 #include "guest_sched.h"
+#include "disc.h"
 #include "settings.h"
 #include "widescreen.h"
 
@@ -240,22 +241,23 @@ static size_t processMemory() {
 static bool g_quit = false;
 static void requestQuit() { g_quit = true; }
 
-// F1 > Update > Restart now: the newly installed executable starts with this one's arguments.
+// Menu > Update / Disc > Restart now: the game starts again with this one's arguments (without a
+// --disc, which would override a newly chosen disc).
 static int g_argc = 0;
 static char** g_argv = nullptr;
-static void restartAfterUpdate() {
+static void restartGame() {
   if (update::restart(g_argc, g_argv)) requestQuit();
-  else LOG_ERROR("could not start the updated game");
+  else LOG_ERROR("could not start the game again");
 }
 
-// Alt+Enter / F11: fullscreen. F1: settings menu (pauses). Esc: close the menu.
+// Alt+Enter / F11: fullscreen. Esc: opens and closes the settings menu (pauses), unless a key
+// binding or a popup in the menu is waiting for it.
 static void handleHotkeys() {
-  static bool wasDown = false, f1WasDown = false;
+  static bool wasDown = false, escWasDown = false;
   const bool* keys = SDL_GetKeyboardState(nullptr);
-  bool f1 = keys[SDL_SCANCODE_F1];
-  if (f1 && !f1WasDown) overlay::toggle();
-  f1WasDown = f1;
-  if (keys[SDL_SCANCODE_ESCAPE] && overlay::isOpen() && !overlay::isCapturingKey()) overlay::close();
+  bool esc = keys[SDL_SCANCODE_ESCAPE];
+  if (esc && !escWasDown && !overlay::wantsEscape()) overlay::toggle();
+  escWasDown = esc;
   bool alt = keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT];
   bool down = keys[SDL_SCANCODE_F11] || (alt && keys[SDL_SCANCODE_RETURN]);
   if (down && !wasDown) setFullscreen(!VIGetWindowFullscreen());
@@ -402,6 +404,33 @@ static bool buildModule(const std::string& dolPath, const std::string& outPath) 
 }
 #endif
 
+// Menu > Disc: the player picks another disc image; it must be NFL Blitz 2003 (USA). Saved for the
+// next start (the running game keeps its disc).
+static bool chooseDisc(std::string* message) {
+  std::string path = pickDisc();
+  if (path.empty()) {
+#ifndef _WIN32
+    if (g_noChooser) *message = "No file chooser (zenity or kdialog) could be shown: set disc = in " + settings::path() + ".";
+#endif
+    return false;
+  }
+  Disc disc;
+  if (!disc.open(path)) {
+    *message = "Cannot open " + path + ".";
+    return false;
+  }
+  if (disc.gameId() != "GO3E5D") {
+    *message = "That is not NFL Blitz 2003 (USA) (game ID " + disc.gameId() + ", expected GO3E5D).";
+    return false;
+  }
+  std::error_code ec;
+  auto u8 = std::filesystem::absolute(std::filesystem::u8path(path), ec).u8string();
+  settings::get().disc = ec ? path : std::string(reinterpret_cast<const char*>(u8.c_str()), u8.size());
+  settings::save();
+  LOG_INFO("disc for the next start: %s", settings::get().disc.c_str());
+  return true;
+}
+
 // Aurora's persistent shader caches (pipeline_cache.db, dawn_cache.db) do not notice when the
 // shader generator changes, so a new build could keep using shaders from an older one (players
 // lost helmets and jersey panels that way). Clear them whenever this executable changes.
@@ -497,7 +526,7 @@ int main(int argc, char** argv) {
     auto group = aurora::texture::load_replacement_directory(packDir);
     (void)group;
   }
-  overlay::init({setFullscreen, applyDisplay, setVolume, requestQuit, restartAfterUpdate});
+  overlay::init({setFullscreen, applyDisplay, setVolume, requestQuit, restartGame, chooseDisc});
   if (st.updateCheck && !getenv("BLITZ_NO_UPDATE_CHECK")) update::checkStart();
   if (getenv("BLITZ_TOPMOST")) SDL_SetWindowAlwaysOnTop(aurora_get_window(), true);  // for screenshots
   // Aurora's GX state defaults; the game's own GXInit stream then sets everything it uses.
@@ -554,7 +583,7 @@ int main(int argc, char** argv) {
       }
       if (!restarted && update::installStatus().state == update::Install::Done) {
         restarted = true;
-        restartAfterUpdate();
+        restartGame();
       }
     }
     if (const char* at = getenv("BLITZ_MENU_AT")) {  // test hook: open the menu after N seconds

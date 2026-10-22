@@ -1,5 +1,7 @@
-// F1 settings overlay (Dear ImGui via Aurora) and the FPS counter.
+// Settings overlay (Esc; Dear ImGui via Aurora) and the FPS counter.
 #pragma once
+
+#include <string>
 
 namespace overlay {
 
@@ -8,7 +10,10 @@ struct Actions {
   void (*applyDisplay)();      // widescreen / HUD / resolution changed
   void (*setVolume)(float gain);
   void (*quit)();
-  void (*restartAfterUpdate)();  // start the newly installed version, then quit
+  void (*restart)();  // start the game again (an installed update, another disc), then quit
+  // Lets the player pick another disc image: true when a valid one was saved for the next start;
+  // otherwise `message` says why not ("" when the player cancelled).
+  bool (*chooseDisc)(std::string* message);
 };
 
 void init(const Actions& actions);  // after aurora_initialize (loads the menu fonts)
@@ -18,6 +23,7 @@ bool ownsPads();  // the game must not see the pads (menu open, or its buttons s
 // Z+Start (or the Back button of a PC gamepad, see main_window) opens and closes the menu.
 void padInput(const unsigned short buttons[4], const signed char stickX[4], const signed char stickY[4]);
 bool isCapturingKey();  // the Controls tab waits for a key (Esc must not close the menu)
+bool wantsEscape();     // a key capture or a popup takes Esc (it must not toggle the menu)
 void toggle();
 void close();
 

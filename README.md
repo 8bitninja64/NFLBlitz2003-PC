@@ -17,7 +17,8 @@ audio through a host implementation of the GameCube's audio DSP, input through S
 - Renders at your screen resolution, with optional supersampling up to 6x (2880p), MSAA and
   anisotropic filtering
 - Locked 60 fps, D3D11 / D3D12 / Vulkan on Windows, Vulkan / OpenGL on Linux
-- **F1 menu** (pauses the game), fully usable with a controller: settings, key rebinding and
+- **Settings menu** (Esc; pauses the game), fully usable with a controller: settings, key rebinding, disc
+  choice, updates from GitHub and
   **cheats** — the game's own codes (infinite turbo, big / huge / team big heads, fast passes,
   fast running, power-ups, super field goals, no punting, chrome ball and more) without entering
   them on the matchup screen
@@ -102,8 +103,10 @@ Gamepads and GameCube adapters work out of the box. Keyboard (player 1):
 | Start | Enter |
 | C-stick | Numpad 8 4 2 6 |
 
-**Menu:** F1, Z+Start on a GameCube pad, or Back/Select on a PC gamepad. In the menu: D-pad or stick
-to move, A to select, B to go back or close, L / R to switch sections. Alt+Enter or F11: fullscreen.
+**Menu:** Esc, Z+Start on a GameCube pad, or Back/Select on a PC gamepad opens and closes it. In the
+menu: D-pad or stick to move, A to choose a section (the highlight moves into its options) or an
+option, B (Backspace) to go back to the section list, L / R to switch sections. Menu > Disc picks
+another disc image. Alt+Enter or F11: fullscreen.
 
 ## Settings and saves
 

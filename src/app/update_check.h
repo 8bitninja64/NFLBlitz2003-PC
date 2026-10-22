@@ -45,8 +45,9 @@ bool versionNewer(const std::string& latest, const std::string& current);
 bool canInstall(const Release& release, std::string& why);
 void installStart(const Release& release);  // background install
 Install installStatus();
-// After a finished install: starts the new executable with this process's arguments (the caller
-// then quits).
+// Starts the program's executable again with this process's arguments, minus a --disc (the disc
+// comes from the settings, which the player may have just changed); the caller then quits. Used
+// after an installed update and after choosing another disc.
 bool restart(int argc, char** argv);
 // At startup: removes the files the last install replaced.
 void cleanup();

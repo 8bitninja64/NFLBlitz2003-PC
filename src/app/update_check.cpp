@@ -586,7 +586,13 @@ bool restart(int argc, char** argv) {
   std::wstring cmd = L"\"" + exe.wstring() + L"\"";
   int n = 0;
   if (LPWSTR* args = CommandLineToArgvW(GetCommandLineW(), &n)) {
-    for (int i = 1; i < n; i++) cmd += L" \"" + std::wstring(args[i]) + L"\"";
+    for (int i = 1; i < n; i++) {
+      if (std::wstring(args[i]) == L"--disc") {  // the disc comes from the settings (it may have changed)
+        i++;
+        continue;
+      }
+      cmd += L" \"" + std::wstring(args[i]) + L"\"";
+    }
     LocalFree(args);
   }
   STARTUPINFOW si{};
@@ -600,7 +606,13 @@ bool restart(int argc, char** argv) {
   std::string path = exe.string();
   std::vector<char*> args;  // made before fork: the child only execs
   args.push_back(const_cast<char*>(path.c_str()));
-  for (int i = 1; i < argc; i++) args.push_back(argv[i]);
+  for (int i = 1; i < argc; i++) {
+    if (!strcmp(argv[i], "--disc")) {  // the disc comes from the settings (it may have changed)
+      i++;
+      continue;
+    }
+    args.push_back(argv[i]);
+  }
   args.push_back(nullptr);
   pid_t pid = fork();
   if (pid == 0) {

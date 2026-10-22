@@ -150,7 +150,7 @@ void drawControls() {
     PADRestoreDefaultKeyBindings(0);
     PADSerializeMappings();
   }
-  ImGui::TextDisabled("F1: this menu   Alt+Enter / F11: fullscreen");
+  ImGui::TextDisabled("Esc: this menu   Alt+Enter / F11: fullscreen");
 }
 
 // --- look ---------------------------------------------------------------------------
@@ -234,8 +234,13 @@ void loadFonts() {
 unsigned short g_padHeld = 0, g_padPrev = 0;
 bool g_holdInput = false;  // after the menu toggled: pads stay away from the game until released
 int g_section = 0;  // the selected menu section
-enum Section { kDisplay, kAudio, kControls, kCheats, kUpdate, kAbout, kSectionCount };
-const char* kSectionNames[kSectionCount] = {"Display", "Audio", "Controls", "Cheats", "Update", "About"};
+enum Section { kDisplay, kAudio, kControls, kCheats, kDisc, kUpdate, kAbout, kSectionCount };
+const char* kSectionNames[kSectionCount] = {"Display", "Audio", "Controls", "Cheats", "Disc", "Update", "About"};
+// Two panes: the section list and the section's options. Choosing a section moves the highlight
+// into its options; B (Backspace) moves it back to the list. Only the menu key closes the menu.
+enum class Focus { None, Sections, Content };
+Focus g_focusTo = Focus::Sections;  // a focus move requested for this frame
+bool g_popupWasOpen = false;        // last frame: B then belongs to the popup (ImGui closes it)
 
 void feedNav() {
   ImGuiIO& io = ImGui::GetIO();
@@ -365,6 +370,31 @@ void drawAbout(settings::Settings& st) {
   ImGui::TextWrapped("Settings: %s", settings::path().c_str());
 }
 
+// Disc: the disc image the game starts from, and choosing another one (used from the next start).
+std::string g_discMessage;
+bool g_discChanged = false;
+
+void drawDisc(settings::Settings& st) {
+  ImGui::TextDisabled("The game reads your NFL Blitz 2003 (USA) disc image every time it starts:");
+  ImGui::TextWrapped("%s", st.disc.empty() ? "(none chosen yet)" : st.disc.c_str());
+  ImGui::Spacing();
+  if (ImGui::Button("Choose a different disc image...") && g_actions.chooseDisc) {
+    std::string message;
+    if (g_actions.chooseDisc(&message)) {
+      g_discChanged = true;
+      g_discMessage.clear();
+    } else if (!message.empty()) {
+      g_discMessage = message;
+    }
+  }
+  if (!g_discMessage.empty()) ImGui::TextColored(kRed, "%s", g_discMessage.c_str());
+  if (g_discChanged) {
+    ImGui::Spacing();
+    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1), "Saved. The game starts from this disc after a restart.");
+    if (ImGui::Button("Restart now") && g_actions.restart) g_actions.restart();
+  }
+}
+
 // Update: this version, the latest GitHub release, and installing it (update_check.h).
 void drawUpdate(settings::Settings& st, bool* changed) {
   update::Release r = update::checkStatus();
@@ -406,7 +436,7 @@ void drawUpdate(settings::Settings& st, bool* changed) {
   if (in.state == update::Install::Failed) ImGui::TextColored(kRed, "The update failed: %s", in.error.c_str());
   if (in.state == update::Install::Done) {
     ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1), "%s is installed. Restart to play it.", r.latest.c_str());
-    if (ImGui::Button("Restart now") && g_actions.restartAfterUpdate) g_actions.restartAfterUpdate();
+    if (ImGui::Button("Restart now") && g_actions.restart) g_actions.restart();
   }
   if (!busy && r.state != update::Release::Checking && in.state != update::Install::Done) {
     if (ImGui::Button("Check now")) update::checkStart();
@@ -431,15 +461,12 @@ void hint(const char* button, ImVec4 color, const char* action) {
 void drawSettings() {
   settings::Settings& st = settings::get();
   ImGuiIO& io = ImGui::GetIO();
-  // Menu-level pad actions: L/R switch sections, B closes the menu when nothing else wants it.
+  // Menu-level actions: L/R switch sections; B (Backspace) goes back to the section list (a popup
+  // or an active widget takes it first). The menu itself closes only with the menu key.
   if (g_padPressed & PAD_TRIGGER_L) g_section = (g_section + kSectionCount - 1) % kSectionCount;
   if (g_padPressed & PAD_TRIGGER_R) g_section = (g_section + 1) % kSectionCount;
-  if ((g_padPressed & PAD_BUTTON_B) && !ImGui::IsAnyItemActive() &&
-      !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) && g_capture < 0) {
-    g_open = false;
-    g_holdInput = true;
-    return;
-  }
+  const bool back = (g_padPressed & PAD_BUTTON_B) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false);
+  if (back && !g_popupWasOpen && !ImGui::IsAnyItemActive() && g_capture < 0) g_focusTo = Focus::Sections;
   // BLITZ_MENU_TAB=<section> selects that section once (screenshots).
   if (static const char* startTab = getenv("BLITZ_MENU_TAB"); startTab) {
     for (int i = 0; i < kSectionCount; i++)
@@ -478,7 +505,14 @@ void drawSettings() {
   for (int i = 0; i < kSectionCount; i++) {
     bool sel = g_section == i;
     if (sel) ImGui::PushStyleColor(ImGuiCol_Header, kRed);
-    if (ImGui::Selectable(kSectionNames[i], sel, 0, ImVec2(0, ImGui::GetTextLineHeight() * 1.8f))) g_section = i;
+    if (sel && g_focusTo == Focus::Sections) {
+      ImGui::SetKeyboardFocusHere();
+      g_focusTo = Focus::None;
+    }
+    if (ImGui::Selectable(kSectionNames[i], sel, 0, ImVec2(0, ImGui::GetTextLineHeight() * 1.8f))) {
+      g_section = i;
+      g_focusTo = Focus::Content;  // into the section's options
+    }
     if (sel) ImGui::PopStyleColor();
   }
   ImGui::PopStyleVar();
@@ -491,11 +525,16 @@ void drawSettings() {
   ImGui::PopFont();
   ImGui::Separator();
   ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.45f);
+  if (g_focusTo == Focus::Content) {
+    ImGui::SetKeyboardFocusHere();  // the section's first option
+    g_focusTo = Focus::None;
+  }
   switch (g_section) {
   case kDisplay: changed |= drawDisplay(st); break;
   case kAudio: changed |= drawAudio(st); break;
   case kControls: drawControls(); break;
   case kCheats: changed |= drawCheats(st); break;
+  case kDisc: drawDisc(st); break;
   case kUpdate: drawUpdate(st, &changed); break;
   case kAbout: drawAbout(st); break;
   }
@@ -506,7 +545,7 @@ void drawSettings() {
   hint("A", ImVec4(0.3f, 0.85f, 0.4f, 1), "select");
   hint("B", kRed, "back");
   hint("L / R", kBlue, "section");
-  hint("Z+Start / F1", kGold, "close");
+  hint("Esc / Z+Start", kGold, "close");
   // Update (highlighted when a newer release is out), Resume, Quit game (asks first).
   const bool updateReady = update::checkStatus().state == update::Release::Available;
   const char* updateLabel = updateReady ? "Update available" : "Update";
@@ -515,7 +554,10 @@ void drawSettings() {
   ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - width(updateLabel) - width("Resume") - width("Quit game") -
                        style.ItemSpacing.x * 2);
   if (updateReady) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.42f, 0.08f, 1.0f));
-  if (ImGui::Button(updateLabel)) g_section = kUpdate;
+  if (ImGui::Button(updateLabel)) {
+    g_section = kUpdate;
+    g_focusTo = Focus::Content;
+  }
   if (updateReady) ImGui::PopStyleColor();
   ImGui::SameLine();
   if (ImGui::Button("Resume")) g_open = false;
@@ -530,6 +572,7 @@ void drawSettings() {
     if (ImGui::Button("Cancel", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
   }
+  g_popupWasOpen = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
   ImGui::End();
   if (changed) settings::save();
 }
@@ -561,6 +604,7 @@ void padInput(const unsigned short buttons[4], const signed char stickX[4], cons
   if (g_holdInput && !held) g_holdInput = false;
   if ((held & combo) == combo && (pressed & combo)) {
     g_open = !g_open;
+    g_focusTo = Focus::Sections;
     g_capture = -1;
     g_padHeld = g_padPrev = 0;
     g_holdInput = true;  // the game gets the pads back once everything is released
@@ -573,8 +617,10 @@ void padInput(const unsigned short buttons[4], const signed char stickX[4], cons
 bool isOpen() { return g_open; }
 bool ownsPads() { return g_open || g_holdInput; }
 bool isCapturingKey() { return g_open && g_capture >= 0; }
+bool wantsEscape() { return g_open && (g_capture >= 0 || g_popupWasOpen); }
 void toggle() {
   g_open = !g_open;
+  g_focusTo = Focus::Sections;  // a menu opens on its section list
   g_holdInput = true;
 }
 void close() {
