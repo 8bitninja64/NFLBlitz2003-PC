@@ -26,5 +26,7 @@ bool takeMotor(int port, uint32_t* cmd);  // true if changed since last call
 
 // Frame clock for scripted input (VI retraces).
 void tick();
+// The game is setting up a players' match (not the attract demo): scripted m+ steps start with it.
+void playersMatchSetup();
 
 }  // namespace padinput

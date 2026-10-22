@@ -1,6 +1,7 @@
 #include "pad_input.h"
 
 #include "log.h"
+#include "widescreen.h"
 
 #include <atomic>
 #include <cstdlib>
@@ -18,13 +19,20 @@ Pad g_pads[kPorts];
 uint32_t g_motor[kPorts];
 bool g_motorDirty[kPorts];
 std::atomic<uint32_t> g_frame{0};
+std::atomic<bool> g_playersMatchSetup{false};
+uint32_t g_matchStart = 0;  // frame the players' match started (0: not yet)
 
 // BLITZ_INPUT="<frame>:<BUTTON[+BUTTON]>[*<frames held>],..." on port 0, frames = VI retraces.
+// <frame> may also be m+<n> (n frames after the players' match started: gameplay input that must not
+// land in the menus when loading is slow) or <first>-m/<period> (every <period> frames from <first>
+// until the players' match starts: menu presses for however long the menus take).
 // Buttons: A B X Y Z L R START UP DOWN LEFT RIGHT, plus STICKUP/STICKDOWN/STICKLEFT/STICKRIGHT.
 struct Step {
   uint32_t frame, hold;
   uint16_t buttons;
   int8_t sx, sy;
+  bool afterMatch = false;   // frame counts from the players' match start
+  uint32_t untilMatch = 0;   // repeat period until the players' match starts (0: once)
 };
 std::vector<Step> g_script;
 bool g_scriptLoaded = false;
@@ -43,6 +51,12 @@ void loadScript() {
     size_t colon = item.find(':');
     if (colon == std::string::npos) continue;
     Step st{(uint32_t)atoi(item.c_str()), 6, 0, 0, 0};
+    if (item[0] == 'm') {
+      st.afterMatch = true;
+      st.frame = (uint32_t)atoi(item.c_str() + 2);
+    } else if (size_t dash = item.find("-m/"); dash < colon) {
+      st.untilMatch = (uint32_t)atoi(item.c_str() + dash + 3);
+    }
     std::string rest = item.substr(colon + 1);
     size_t star = rest.find('*');
     if (star != std::string::npos) {
@@ -90,9 +104,21 @@ void read(Pad pads[kPorts]) {
   }
   if (g_script.empty()) return;
   uint32_t f = g_frame.load();
+  if (!g_matchStart && g_playersMatchSetup.load() && widescreen::inMatch()) {
+    g_matchStart = f;
+    LOG_INFO("scripted input: players' match from frame %u", f);
+  }
   pads[0].err = 0;
   for (const Step& st : g_script) {
-    if (f >= st.frame && f < st.frame + st.hold) {
+    uint32_t at = st.frame;
+    if (st.afterMatch) {
+      if (!g_matchStart) continue;
+      at += g_matchStart;
+    } else if (st.untilMatch) {
+      if (g_matchStart || f < st.frame) continue;
+      at = f - (f - st.frame) % st.untilMatch;
+    }
+    if (f >= at && f < at + st.hold) {
       pads[0].button |= st.buttons;
       if (st.sx) pads[0].stickX = st.sx;
       if (st.sy) pads[0].stickY = st.sy;
@@ -122,5 +148,7 @@ bool takeMotor(int port, uint32_t* cmd) {
 }
 
 void tick() { g_frame.fetch_add(1); }
+
+void playersMatchSetup() { g_playersMatchSetup.store(true); }
 
 }  // namespace padinput

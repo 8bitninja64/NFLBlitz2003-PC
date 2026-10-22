@@ -5,6 +5,7 @@
 #include "gx_bridge.h"
 #include "hw.h"
 #include "log.h"
+#include "first_start.h"
 #include "frame_shot.h"
 #include "overlay.h"
 #include "pad_input.h"
@@ -32,6 +33,7 @@
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_scancode.h>
 #include <dolphin/gx.h>
@@ -40,6 +42,7 @@
 #include <aurora/texture.hpp>  // after the dolphin headers (uses GX types)
 
 #include <chrono>
+#include <mutex>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -69,20 +72,31 @@ static void setDefaultKeys() {
   if (!PADSetDefaultKeyBindings(0, &b)) LOG_WARN("could not set default keyboard bindings");
 }
 
-// Game audio (AI DMA output, 32 kHz stereo) to the default playback device.
+// Game audio (AI DMA output, 32 kHz stereo) to the default playback device. The AI DMA thread keeps
+// submitting until the process ends: the lock lets quitting close the stream before SDL shuts down.
 static SDL_AudioStream* g_audioStream = nullptr;
+static std::mutex g_audioLock;
 
 static void audioSubmit(const int16_t* lr, uint32_t frames) {
-  SDL_PutAudioStreamData(g_audioStream, lr, (int)(frames * 4));
+  std::lock_guard lk(g_audioLock);
+  if (g_audioStream) SDL_PutAudioStreamData(g_audioStream, lr, (int)(frames * 4));
 }
 
 static uint32_t audioQueued() {
-  int bytes = SDL_GetAudioStreamQueued(g_audioStream);
+  std::lock_guard lk(g_audioLock);
+  int bytes = g_audioStream ? SDL_GetAudioStreamQueued(g_audioStream) : 0;
   return bytes > 0 ? (uint32_t)bytes / 4 : 0;
 }
 
 static void setVolume(float gain) {
+  std::lock_guard lk(g_audioLock);
   if (g_audioStream) SDL_SetAudioStreamGain(g_audioStream, gain);
+}
+
+static void closeAudio() {
+  std::lock_guard lk(g_audioLock);
+  if (g_audioStream) SDL_DestroyAudioStream(g_audioStream);
+  g_audioStream = nullptr;
 }
 
 static void initAudio() {
@@ -99,6 +113,7 @@ static void initAudio() {
   }
   setVolume(settings::get().mute ? 0.0f : settings::get().volume / 100.0f);
   SDL_ResumeAudioStreamDevice(g_audioStream);
+  LOG_INFO("audio: %s driver, device open", SDL_GetCurrentAudioDriver());
   static const audioout::Sink sink{audioSubmit, audioQueued, 32000};
   audioout::setSink(&sink);
 }
@@ -172,8 +187,16 @@ static std::string userDataDir() {
   const char* base = getenv("APPDATA");
   std::string dir = std::string(base ? base : ".") + "/NFL Blitz 2003";
 #else
-  const char* home = getenv("HOME");
-  std::string dir = std::string(home ? home : ".") + "/.local/share/NFL Blitz 2003";
+  // SDL's rule ($XDG_DATA_HOME, else ~/.local/share), which Aurora's memory card and caches follow too.
+  std::string dir;
+  if (char* pref = SDL_GetPrefPath(nullptr, "NFL Blitz 2003")) {
+    dir = pref;
+    SDL_free(pref);
+    while (dir.size() > 1 && dir.back() == '/') dir.pop_back();
+  } else {
+    const char* home = getenv("HOME");
+    dir = std::string(home ? home : ".") + "/.local/share/NFL Blitz 2003";
+  }
 #endif
   std::error_code ec;
   std::filesystem::create_directories(std::filesystem::u8path(dir), ec);
@@ -321,20 +344,16 @@ static std::string exeDir() {
   return std::filesystem::read_symlink("/proc/self/exe", ec).parent_path().string();
 }
 
-// Single-quoted for /bin/sh.
-static std::string shellQuote(const std::string& s) {
-  std::string q = "'";
-  for (char c : s) q += c == '\'' ? std::string("'\\''") : std::string(1, c);
-  return q + "'";
-}
+// The desktop's file chooser (zenity on GNOME, SteamOS and most others; kdialog on KDE).
+static bool g_noChooser = false;
 
-// The desktop's file chooser (zenity on GNOME and most others, kdialog on KDE).
 static std::string pickDisc() {
   const char* cmds[] = {
       "zenity --file-selection --title='Select your NFL Blitz 2003 (USA) GameCube disc image' "
-      "--file-filter='GameCube disc image | *.iso *.gcm *.rvz *.wia *.ciso *.gcz *.nfs' 2>/dev/null",
+      "--file-filter='GameCube disc image | *.[iI][sS][oO] *.[gG][cC][mM] *.[rR][vV][zZ] *.[wW][iI][aA] "
+      "*.[cC][iI][sS][oO] *.[gG][cC][zZ] *.[nN][fF][sS]' --file-filter='All files | *' 2>/dev/null",
       "kdialog --title 'Select your NFL Blitz 2003 (USA) GameCube disc image' "
-      "--getopenfilename . '*.iso *.gcm *.rvz *.wia *.ciso *.gcz *.nfs' 2>/dev/null"};
+      "--getopenfilename . 'GameCube disc image (*.iso *.gcm *.rvz *.wia *.ciso *.gcz *.nfs)' 2>/dev/null"};
   for (const char* cmd : cmds) {
     FILE* p = popen(cmd, "r");
     if (!p) continue;
@@ -345,17 +364,24 @@ static std::string pickDisc() {
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
     if (status == 0 && !out.empty()) return out;
     if (WIFEXITED(status) && WEXITSTATUS(status) == 1) return {};  // cancelled
+    // 127: not installed (sh: command not found); anything else: it could not show itself.
   }
-  LOG_ERROR("no file chooser (zenity or kdialog) found: start the game with --disc <path to your disc image>");
+  g_noChooser = true;
+  LOG_ERROR("no file chooser (zenity or kdialog) could be shown: start the game with --disc <path to your disc image>");
   return {};
 }
 
 static void showError(const std::string& msg) {
-  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "NFL Blitz 2003", msg.c_str(), nullptr);
+  std::string text = msg;
+  if (g_noChooser)
+    text += "\n\nNo file chooser (zenity or kdialog) could be shown to pick it. Start the game with "
+            "--disc \"/path/to/NFL Blitz 2003 (USA).iso\" (in Steam: Properties > Launch Options).";
+  if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "NFL Blitz 2003", text.c_str(), nullptr))
+    LOG_ERROR("cannot show the error message (%s)", SDL_GetError());
 }
 
 // First run: compile the game code from the player's disc with tools/make_module.sh (next to the
-// executable). Its output goes to the terminal, if any, and to module_build/build.log.
+// executable), in a window that shows the progress (first_start.cpp).
 static bool buildModule(const std::string& dolPath, const std::string& outPath) {
   std::filesystem::path script = std::filesystem::path(exeDir()) / "tools" / "make_module.sh";
   if (!std::filesystem::exists(script)) {
@@ -363,28 +389,7 @@ static bool buildModule(const std::string& dolPath, const std::string& outPath) 
               "next to NFLBlitz2003.");
     return false;
   }
-  if (!getenv("BLITZ_AUTO_BUILD")) {
-    const SDL_MessageBoxButtonData buttons[] = {
-        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Compile now"},
-        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit"}};
-    const SDL_MessageBoxData box{SDL_MESSAGEBOX_INFORMATION, nullptr, "NFL Blitz 2003 - first start",
-                                 "NFL Blitz 2003 needs to compile the game code from your disc. This is done once "
-                                 "and takes a few minutes.\n\nRequirements: python3 and clang++ (packages python3 "
-                                 "and clang).",
-                                 2, buttons, nullptr};
-    int choice = 0;
-    if (!SDL_ShowMessageBox(&box, &choice) || choice != 1) return false;
-  }
-  std::string work = std::filesystem::path(dolPath).parent_path().string();
-  std::string log = work + "/build.log";
-  std::string status = shellQuote(work + "/status");
-  std::string cmd = "{ sh " + shellQuote(script.string()) + " " + shellQuote(dolPath) + " " + shellQuote(outPath) +
-                    " " + shellQuote(work) + "; echo $? > " + status + "; } 2>&1 | tee " + shellQuote(log) +
-                    "; exit $(cat " + status + " 2>/dev/null || echo 1)";
-  LOG_INFO("compiling the game code: %s", cmd.c_str());
-  bool ok = system(cmd.c_str()) == 0;
-  if (!ok) showError("Compiling the game code failed. The output is in " + log + ".");
-  return ok;
+  return firststart::build(script.string(), dolPath, outPath, !getenv("BLITZ_AUTO_BUILD"));
 }
 #endif
 
@@ -459,6 +464,19 @@ int main(int argc, char** argv) {
   config.mem1Size = 0;  // guest memory is owned by the runtime
   config.mem2Size = 0;
   aurora_initialize(argc, argv, &config);
+  // Aurora falls back to its Null backend when no graphics adapter works: the game would run with
+  // sound and no picture. Say why instead (BLITZ_ALLOW_NULL_GPU=1 keeps running, for tests).
+  if (aurora_get_backend() == BACKEND_NULL && !getenv("BLITZ_ALLOW_NULL_GPU")) {
+    showError("No usable graphics driver was found. NFL Blitz 2003 needs Vulkan"
+#ifdef _WIN32
+              " or Direct3D 11/12"
+#endif
+              " (update or install your GPU driver; on Linux, Mesa's Vulkan drivers or NVIDIA's). The log "
+              "names the adapters that were tried.");
+    aurora_shutdown();
+    fflush(nullptr);
+    std::_Exit(1);
+  }
   if (st.windowWidth <= 0 || st.windowHeight <= 0) fitWindowToDisplay(aurora_get_window(), st.widescreen);
   applyDisplay();
   if (st.texturePacks) {
@@ -600,6 +618,7 @@ int main(int argc, char** argv) {
   }
   hw::g_paused.store(false);
   gxbridge::shutdown();
+  closeAudio();
   aurora_shutdown();
   // The game's threads are still running: returning would destroy the runtime's globals (the guest
   // thread list ...) under them, and a thread that then looks itself up aborts the process.

@@ -83,14 +83,37 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - `tools/build_linux.sh [disc] [dir]` (Ubuntu/WSL; clang + Ninja): NFLBlitz2003 + blitz_game.so (dlopen'd
   from the executable's directory; built with -Bsymbolic/hidden visibility). blitz_headless is not built
   by default on Linux (GNU ld + circular Aurora static deps). User data: ~/.local/share/NFL Blitz 2003.
-- Release: `tools/package_linux.sh [build dir] [out]` -> dist/NFLBlitz2003-linux-x64.tar.xz (~6 MB). The first
-  start compiles the module with tools/make_module.sh (python3 + clang++) into the user directory;
-  disc picker zenity/kdialog, message boxes via SDL.
+- Release: `tools/package_linux.sh [build dir] [out]` -> dist/NFLBlitz2003-linux-x64.tar.xz (~50 MB): the
+  runtime + tools/zig.tar.xz, a trimmed Zig 0.17.0 (ZIG_DIR, default ~/zig/zig-x86_64-linux-0.17.0; CI
+  downloads it, sha256 pinned in build.yml) because SteamOS has no compiler (the user's Deck failed with
+  "clang++ is required"). Only x86_64-linux-gnu libc trees are kept; license texts in licenses/ (zig.txt,
+  glibc-LICENSES, LGPL-2.1, GPL-2.0 + Linux-syscall-note from third_party_licenses/).
+- First start (src/app/first_start.cpp): its own SDL window before the game's (Game Mode has no
+  terminal): asks (A/Enter, B/Esc, mouse), runs tools/make_module.sh in its own process group without
+  Steam's LD_PRELOAD, progress from its "# step" / "compiled <file>" lines, build.log in module_build/,
+  flock on module_build/lock, failure screen with the output tail. make_module.sh: bundled Zig (unpacked
+  into the work dir, removed after, also on cancel), else clang++/g++ (BLITZ_CXX); clean gen/obj every
+  build; NUL-separated xargs (paths with ' or " or spaces: the user dir is "NFL Blitz 2003").
+- Module stamp (boot_args.cpp): a user-directory module loads only if <module>.stamp equals a hash of the
+  shipped build inputs (recompiler, config, module-side sources, make_module); else it is rebuilt (an
+  update would otherwise keep an old module). Development builds (no tools/ beside the exe) skip it.
+- User dir via SDL_GetPrefPath on Linux ($XDG_DATA_HOME), the same rule as Aurora's card/caches.
 - src/runtime/guest_sched.h was sched.h: on Linux it shadowed the system <sched.h> (pthread.h).
 - **Test: `tools/verify_linux.ps1`** (NBA Hangtime's verify_linux approach): packages, unpacks into
-  /root/blitz-verify, first-start compile, soak input to live play under WSLg, screenshots of the real
-  WSLg window (build/verify_linux/), BLITZ_WAV audio level (tools/wavlevel.py), checks GPU adapter /
-  players' match ("match setup: players' match" + "match on") / clean quit. LOOK at the screenshots.
+  /root/blitz-verify, first-start compile, tools/verify_input.txt (menu presses until the players' match,
+  then gameplay input relative to it: BLITZ_INPUT "F-m/P" and "m+N" steps) under WSLg, screenshots of the
+  real WSLg window (build/verify_linux/), BLITZ_WAV audio level (tools/wavlevel.py), checks GPU adapter /
+  audio device / players' match / still running at the end. LOOK at the screenshots.
+- **Distros: `tools/verify_distros.ps1 [-Only "arch,fedora"]`** runs it with `-Image <distro>` in Podman
+  containers (WSL; WSLg X11 + PulseAudio sockets mounted; each distro's own Mesa lavapipe): only what a
+  desktop install has, no compiler. Use the runtime built like CI: `podman run -v <repo>:/src:ro -v
+  /root/blitz-r2204:/build ubuntu:22.04 sh /src/tools/build_linux_release.sh /src /build` (~40 min, Dawn
+  from source). Results in build/verify_linux/<distro>/ and distros.txt.
+- Release runtime (tools/build_linux_release.sh, CI): Ubuntu 22.04 container, clang 18 from apt.llvm.org
+  (key fingerprint checked) + g++-12's libstdc++ + pip CMake, AURORA_DAWN_PROVIDER/SDL3_PROVIDER=vendor
+  (the prebuilt Dawn needs glibc 2.38 and clang >= 16), no system png/freetype/zstd/sqlite/absl/fmt:
+  needs glibc 2.34 and libz only. package_linux.sh checks BLITZ_MAX_GLIBC=2.35. Recipe from the Super
+  Mario Strikers port (github.com/new-coke/strikers, release.yml / install-linux-deps.sh).
 - WSL GPU (Ubuntu 26.04, RTX 3070 laptop): no GPU Vulkan; Dawn's OpenGL ES on Mesa d3d12 needs
   GALLIUM_DRIVER=d3d12 LD_LIBRARY_PATH=/usr/lib/wsl/lib MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA (the iGPU
   fails with EGL_BAD_MATCH and the game silently ran on Aurora's Null backend: sound, no picture).
@@ -106,7 +129,8 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
 - `BLITZ_INPUT="<retrace>:<BTN[+BTN]>[*hold],..."` scripted port-1 input (A B X Y Z L R START UP DOWN
   LEFT RIGHT STICKUP/DOWN/LEFT/RIGHT). Reaching a match from boot (title ~22 s at 60 fps):
   START every 60 from 1300 (x12), A at 2200 and 2400 (continue without card), START every 60 from 2700
-  (x6), then A every 120 from 3800.
+  (x6), then A every 120 from 3800. Load-speed independent forms: `<first>-m/<period>:BTN` repeats until
+  the players' match starts, `m+<n>:BTN` counts from it (tools/verify_input.txt).
 - `BLITZ_WAV_DSP=<file>` raw s16 L/R of every frame the DSP renders (compare with BLITZ_WAV to separate
   mixing bugs from playback bugs); `BLITZ_AX_LOGCMDS=<list>,<n>` logs command lists; `tools/wavstat.py`
   counts clicks (and their position in the 160-sample frame), dropouts, clipping-free spectral balance.

@@ -18,6 +18,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,18 @@ static std::string exeDir() {
 #endif
 }
 
+// The same folder as a path, without a round trip through the ANSI code page on Windows (u8path
+// throws on an ANSI string with non-ASCII characters).
+static std::filesystem::path exeDirPath() {
+#ifdef _WIN32
+  wchar_t buf[MAX_PATH];
+  DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+  return std::filesystem::path(std::wstring(buf, n)).parent_path();
+#else
+  return std::filesystem::path(exeDir());
+#endif
+}
+
 #ifdef _WIN32
 static const char* kModuleName = "blitz_game.dll";
 static const char* kModuleTool = "tools/make_module.ps1";
@@ -51,6 +64,35 @@ static const char* kModuleTool = "tools/make_module.ps1";
 static const char* kModuleName = "blitz_game.so";
 static const char* kModuleTool = "tools/make_module.sh";
 #endif
+
+// What a module built on this machine is built with: the recompiler, its configuration and the
+// module-side runtime sources the package carries next to the executable. A module compiled by an
+// earlier release (same disc, same ABI number) would otherwise keep loading after an update that
+// changed any of them. "" when they are not there (a development build: no check).
+static std::string buildInputsStamp() {
+  const char* inputs[] = {"tools/recomp/analyze.py", "tools/recomp/recomp.py", "tools/recomp/dol.py",
+                          "tools/recomp/ppc.py",     "tools/gcdisc.py",        "config/hooks.txt",
+                          "config/sdk_symbols.txt",  "config/symbols.txt",     "src/runtime/ctx.h",
+                          "src/runtime/func_table.h", "src/runtime/module_abi.h", "src/runtime/module_rt.cpp",
+#ifndef _WIN32
+                          "tools/compile_module.py",
+#endif
+                          kModuleTool};
+  std::string all;
+  for (const char* name : inputs) {
+    std::ifstream in(exeDirPath() / name, std::ios::binary);
+    if (!in) return {};
+    all += name;
+    all += '\0';
+    all.append(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  }
+  return dolHash(reinterpret_cast<const uint8_t*>(all.data()), all.size());
+}
+
+static std::string readSmallFile(const std::string& path) {
+  std::ifstream in(std::filesystem::u8path(path), std::ios::binary);
+  return in ? std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()) : std::string();
+}
 
 bool bootFromArgs(int argc, char** argv, BootOptions* opts) {
 #ifdef _WIN32
@@ -142,17 +184,25 @@ bool bootFromArgs(int argc, char** argv, BootOptions* opts) {
   };
   std::string primary = opts && !opts->modulePath.empty() ? opts->modulePath : defaultModulePath();
   std::string built = opts && !opts->userDir.empty() ? opts->userDir + "/" + kModuleName : std::string();
-  bool loaded = tryLoad(primary) || (!built.empty() && tryLoad(built));
+  // The module built into the user directory counts only if this release's build inputs made it.
+  const std::string stamp = buildInputsStamp();
+  bool builtCurrent = !built.empty() && (stamp.empty() || readSmallFile(built + ".stamp") == stamp);
+  if (!builtCurrent && fileExists(built)) LOG_INFO("%s was compiled by another version: compiling it again", built.c_str());
+  bool loaded = tryLoad(primary) || (builtCurrent && tryLoad(built));
   if (!loaded && opts && opts->buildModule && !built.empty()) {
     std::string dolPath = opts->userDir + "/module_build/main.dol";
     std::error_code ec;
     std::filesystem::create_directories(std::filesystem::u8path(opts->userDir + "/module_build"), ec);
-    std::ofstream out(std::filesystem::u8path(dolPath), std::ios::binary);
+    // Written aside and renamed: a second start must not truncate it under a running build.
+    std::ofstream out(std::filesystem::u8path(dolPath + ".tmp"), std::ios::binary);
     out.write(reinterpret_cast<const char*>(dol.data()), (std::streamsize)dol.size());
     out.close();
-    if (!out) return fail("cannot write " + dolPath);
+    std::filesystem::rename(std::filesystem::u8path(dolPath + ".tmp"), std::filesystem::u8path(dolPath), ec);
+    if (!out || ec) return fail("cannot write " + dolPath);
+    std::filesystem::remove(std::filesystem::u8path(built + ".stamp"), ec);
     if (!opts->buildModule(dolPath, built)) return false;  // it reported why
     loaded = tryLoad(built);
+    if (loaded && !stamp.empty()) std::ofstream(std::filesystem::u8path(built + ".stamp"), std::ios::binary) << stamp;
   }
   if (!loaded) {
     if (error.empty()) error = "The game module (" + primary + ") is missing. Build it from your disc with " + kModuleTool + ".";

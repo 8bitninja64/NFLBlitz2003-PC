@@ -40,15 +40,23 @@ audio through a host implementation of the GameCube's audio DSP, input through S
 ## Playing on Linux
 
 1. Download `NFLBlitz2003-linux-x64.tar.xz` from the [Releases](../../releases) page and unpack it
-   (`tar xf NFLBlitz2003-linux-x64.tar.xz`). It runs on x86-64 distributions from about 2024 on
-   (glibc 2.39; Ubuntu 24.04, Fedora 40, Debian 13 and newer) and needs a Vulkan driver (Mesa or
+   (`tar xf NFLBlitz2003-linux-x64.tar.xz`). It runs on x86-64 distributions from about 2022 on
+   (glibc 2.35: SteamOS, Ubuntu 22.04, Linux Mint 21, Pop!_OS 22.04, Debian 12, Fedora, Arch, openSUSE
+   Tumbleweed and newer) and needs a Vulkan driver (Mesa or
    NVIDIA's, standard on current distributions and the Steam Deck). The OpenGL ES fallback does not
    draw the game correctly yet.
-2. Install the packages for the one-time compile: `python3` and `clang`
-   (`sudo apt install python3 clang` on Ubuntu/Debian, `sudo dnf install python3 clang` on Fedora).
-3. Run `NFLBlitz2003/NFLBlitz2003` and pick your disc image when asked (needs `zenity` or `kdialog`;
-   otherwise start it with `--disc "path/to/NFL Blitz 2003 (USA).iso"`). The first start compiles the
-   game code from your disc, which takes a few minutes; run it from a terminal to watch the progress.
+2. Run `NFLBlitz2003/NFLBlitz2003` and pick your disc image when asked (needs `zenity` or `kdialog`,
+   which desktops including the Steam Deck have; otherwise start it with
+   `--disc "path/to/NFL Blitz 2003 (USA).iso"`). The first start compiles the game code from your disc
+   with the compiler the package carries (Zig): a window asks first and shows the progress (a minute
+   or two on a desktop, about five on a Steam Deck; controller, keyboard or mouse). It needs
+   `python3`, which SteamOS and desktop distributions include. The output is kept in
+   `~/.local/share/NFL Blitz 2003/module_build/build.log`.
+
+**Steam Deck:** unpack it in Desktop Mode (e.g. into `~/Games`), start `NFLBlitz2003` once there to
+pick the disc and compile, then add it to Steam (*Add a Non-Steam Game*) to play in Game Mode. To
+start with a particular disc image, set the shortcut's Launch Options to
+`--disc "/path/to/NFL Blitz 2003 (USA).iso"`.
 
 ## Building from source
 

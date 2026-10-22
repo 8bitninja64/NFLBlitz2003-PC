@@ -8,6 +8,7 @@
 
 #include "hle.h"
 #include "log.h"
+#include "pad_input.h"
 #include "settings.h"
 #include "widescreen.h"
 
@@ -80,6 +81,7 @@ void applyNow(uint64_t mask, uint64_t previous) {
 HLE(MatchCheats) {
   LOG_INFO("match setup: %s", c.lr == 0x80033E24 ? "players' match" : "attract demo");
   if (c.lr != 0x80033E24) return;
+  padinput::playersMatchSetup();
   uint64_t mask = settings::get().cheats, on = 0, off = 0;
   for (int i = 0; i < cheats::kCount; i++) {
     const cheats::Cheat& ch = cheats::kList[i];

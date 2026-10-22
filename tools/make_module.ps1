@@ -28,6 +28,8 @@ if ($py.Count) { & $py[0] $py[1..9] -c "import sys; sys.exit(sys.version_info < 
 if (-not $py.Count) { Write-Error "Python 3.8 or newer is required (python.org)."; exit 1 }
 function Invoke-Python { & $py[0] $py[1..9] -I @args }
 
+# The recompiler rewrites every chunk; chunks left by another version must not be compiled in.
+if (Test-Path "$Work/gen") { Remove-Item -Recurse -Force "$Work/gen" }
 New-Item -ItemType Directory -Force "$Work/gen" | Out-Null
 if (-not $Dol) {
   Invoke-Python tools/gcdisc.py $Disc $Work --dol-only; if ($LASTEXITCODE) { exit 1 }
