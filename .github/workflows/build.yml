@@ -1,5 +1,5 @@
 # Builds the runtime (no game code: the game module is compiled from each player's own disc) on
-# Windows and Linux. The Windows job packages the release zip; tags v* publish it as a release.
+# Windows and Linux and packages each (zip / tar.xz); tags v* publish both as a release.
 name: build
 
 on:
@@ -52,3 +52,14 @@ jobs:
           cmake -S . -B build/linux-clang -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           cmake --build build/linux-clang --target blitz
+      - name: Package
+        run: sh tools/package_linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NFLBlitz2003-linux-x64
+          path: dist/NFLBlitz2003-linux-x64.tar.xz
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/NFLBlitz2003-linux-x64.tar.xz

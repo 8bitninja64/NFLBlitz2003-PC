@@ -80,13 +80,25 @@ DolRecomp, ModernGekko). Aurora is MIT; Dusklight/SMS/Prime decomps and AxioDL/m
   window captures as white) or `tools/capture_screen.ps1`.
 
 ## Linux
-- `tools/build_linux.sh [dir]` (Ubuntu/WSL; clang + Ninja): NFLBlitz2003 + blitz_game.so (dlopen'd from
-  the executable's directory; built with -Bsymbolic/hidden visibility). blitz_headless is not built by
-  default on Linux (GNU ld + circular Aurora static deps). User data: ~/.local/share/NFL Blitz 2003.
+- `tools/build_linux.sh [disc] [dir]` (Ubuntu/WSL; clang + Ninja): NFLBlitz2003 + blitz_game.so (dlopen'd
+  from the executable's directory; built with -Bsymbolic/hidden visibility). blitz_headless is not built
+  by default on Linux (GNU ld + circular Aurora static deps). User data: ~/.local/share/NFL Blitz 2003.
+- Release: `tools/package_linux.sh [build dir] [out]` -> dist/NFLBlitz2003-linux-x64.tar.xz (~6 MB). The first
+  start compiles the module with tools/make_module.sh (python3 + clang++) into the user directory;
+  disc picker zenity/kdialog, message boxes via SDL.
 - src/runtime/guest_sched.h was sched.h: on Linux it shadowed the system <sched.h> (pthread.h).
-- Tested in WSL (Ubuntu 26.04): runs at 60 fps with GALLIUM_DRIVER=d3d12 LD_LIBRARY_PATH=/usr/lib/wsl/lib
-  (Dawn OpenGL ES backend); WSL has no GPU Vulkan here and Mesa's software GL (llvmpipe) crashes in
-  Dawn pipeline creation. BLITZ_SHOT readback does not work on the GL backend.
+- **Test: `tools/verify_linux.ps1`** (NBA Hangtime's verify_linux approach): packages, unpacks into
+  /root/blitz-verify, first-start compile, soak input to live play under WSLg, screenshots of the real
+  WSLg window (build/verify_linux/), BLITZ_WAV audio level (tools/wavlevel.py), checks GPU adapter /
+  players' match ("match setup: players' match" + "match on") / clean quit. LOOK at the screenshots.
+- WSL GPU (Ubuntu 26.04, RTX 3070 laptop): no GPU Vulkan; Dawn's OpenGL ES on Mesa d3d12 needs
+  GALLIUM_DRIVER=d3d12 LD_LIBRARY_PATH=/usr/lib/wsl/lib MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA (the iGPU
+  fails with EGL_BAD_MATCH and the game silently ran on Aurora's Null backend: sound, no picture).
+  **The GLES path draws garbled geometry**; the same build through Vulkan is correct, so judge the picture
+  with `-LinuxEnv 'BLITZ_BACKEND=vulkan BLITZ_CPU_GPU=1'` (lavapipe on the CPU, ~20 fps; BLITZ_CPU_GPU
+  lets Aurora take a CPU adapter). Real Linux/Steam Deck use Vulkan.
+- Quit: main ends with std::_Exit(0) after aurora_shutdown; returning ran static destructors under the
+  still-running guest threads ("OSResumeThread: unknown thread" FATAL/abort on quit, both platforms).
 
 ## Debugging
 - `BLITZ_WATCHDOG=<s>`: per-thread last functions + loop back-edge, guest back-chain stacks, GX stats.

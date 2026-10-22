@@ -10,6 +10,7 @@
 #include "pad_input.h"
 #include "guest_sched.h"
 #include "settings.h"
+#include "widescreen.h"
 
 #include "gx/fifo.hpp"  // Aurora internal: fifo::drain
 
@@ -19,6 +20,8 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <psapi.h>
+#else
+#include <sys/wait.h>
 #endif
 
 #include <aurora/aurora.h>
@@ -29,6 +32,7 @@
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_scancode.h>
 #include <dolphin/gx.h>
 #include <dolphin/pad.h>
@@ -311,6 +315,77 @@ static bool buildModule(const std::string& dolPath, const std::string& outPath) 
   if (code != 0) showError("Compiling the game code failed (see the console output).");
   return code == 0;
 }
+#else
+static std::string exeDir() {
+  std::error_code ec;
+  return std::filesystem::read_symlink("/proc/self/exe", ec).parent_path().string();
+}
+
+// Single-quoted for /bin/sh.
+static std::string shellQuote(const std::string& s) {
+  std::string q = "'";
+  for (char c : s) q += c == '\'' ? std::string("'\\''") : std::string(1, c);
+  return q + "'";
+}
+
+// The desktop's file chooser (zenity on GNOME and most others, kdialog on KDE).
+static std::string pickDisc() {
+  const char* cmds[] = {
+      "zenity --file-selection --title='Select your NFL Blitz 2003 (USA) GameCube disc image' "
+      "--file-filter='GameCube disc image | *.iso *.gcm *.rvz *.wia *.ciso *.gcz *.nfs' 2>/dev/null",
+      "kdialog --title 'Select your NFL Blitz 2003 (USA) GameCube disc image' "
+      "--getopenfilename . '*.iso *.gcm *.rvz *.wia *.ciso *.gcz *.nfs' 2>/dev/null"};
+  for (const char* cmd : cmds) {
+    FILE* p = popen(cmd, "r");
+    if (!p) continue;
+    std::string out;
+    char buf[512];
+    while (size_t n = fread(buf, 1, sizeof(buf), p)) out.append(buf, n);
+    int status = pclose(p);
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
+    if (status == 0 && !out.empty()) return out;
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 1) return {};  // cancelled
+  }
+  LOG_ERROR("no file chooser (zenity or kdialog) found: start the game with --disc <path to your disc image>");
+  return {};
+}
+
+static void showError(const std::string& msg) {
+  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "NFL Blitz 2003", msg.c_str(), nullptr);
+}
+
+// First run: compile the game code from the player's disc with tools/make_module.sh (next to the
+// executable). Its output goes to the terminal, if any, and to module_build/build.log.
+static bool buildModule(const std::string& dolPath, const std::string& outPath) {
+  std::filesystem::path script = std::filesystem::path(exeDir()) / "tools" / "make_module.sh";
+  if (!std::filesystem::exists(script)) {
+    showError("The game code has not been compiled yet, and the setup files (tools/make_module.sh) are missing "
+              "next to NFLBlitz2003.");
+    return false;
+  }
+  if (!getenv("BLITZ_AUTO_BUILD")) {
+    const SDL_MessageBoxButtonData buttons[] = {
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Compile now"},
+        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit"}};
+    const SDL_MessageBoxData box{SDL_MESSAGEBOX_INFORMATION, nullptr, "NFL Blitz 2003 - first start",
+                                 "NFL Blitz 2003 needs to compile the game code from your disc. This is done once "
+                                 "and takes a few minutes.\n\nRequirements: python3 and clang++ (packages python3 "
+                                 "and clang).",
+                                 2, buttons, nullptr};
+    int choice = 0;
+    if (!SDL_ShowMessageBox(&box, &choice) || choice != 1) return false;
+  }
+  std::string work = std::filesystem::path(dolPath).parent_path().string();
+  std::string log = work + "/build.log";
+  std::string status = shellQuote(work + "/status");
+  std::string cmd = "{ sh " + shellQuote(script.string()) + " " + shellQuote(dolPath) + " " + shellQuote(outPath) +
+                    " " + shellQuote(work) + "; echo $? > " + status + "; } 2>&1 | tee " + shellQuote(log) +
+                    "; exit $(cat " + status + " 2>/dev/null || echo 1)";
+  LOG_INFO("compiling the game code: %s", cmd.c_str());
+  bool ok = system(cmd.c_str()) == 0;
+  if (!ok) showError("Compiling the game code failed. The output is in " + log + ".");
+  return ok;
+}
 #endif
 
 // Aurora's persistent shader caches (pipeline_cache.db, dawn_cache.db) do not notice when the
@@ -353,11 +428,9 @@ int main(int argc, char** argv) {
   settings::Settings& st = settings::get();
   guest::BootOptions boot;
   boot.rememberedDisc = st.disc;
-#ifdef _WIN32
   boot.pickDisc = pickDisc;
   boot.showError = showError;
   boot.buildModule = buildModule;
-#endif
   boot.userDir = userDataDir();
   if (!guest::bootFromArgs(argc, argv, &boot)) return 1;
   if (!getenv("BLITZ_DISC")) {
@@ -381,6 +454,7 @@ int main(int argc, char** argv) {
   config.maxTextureAnisotropy = (uint16_t)st.anisotropy;
   config.startFullscreen = st.fullscreen;
   config.desiredBackend = backendFromSettings(getenv("BLITZ_BACKEND") ? getenv("BLITZ_BACKEND") : st.backend);
+  config.allowCpuAdapter = getenv("BLITZ_CPU_GPU") != nullptr;  // software renderers (lavapipe): tests only
   config.allowTextureDumps = st.dumpTextures;
   config.mem1Size = 0;  // guest memory is owned by the runtime
   config.mem2Size = 0;
@@ -517,9 +591,18 @@ int main(int argc, char** argv) {
       fpsStart = now;
     }
     if (++frames % 600 == 0) LOG_INFO("presented %llu frames", (unsigned long long)frames);
+    // Match start/end in the log (test runs check that scripted input reached live play).
+    static bool wasInMatch = false;
+    if (bool m = widescreen::inMatch(); m != wasInMatch) {
+      wasInMatch = m;
+      LOG_INFO("match %s at frame %llu", m ? "on" : "off", (unsigned long long)frames);
+    }
   }
   hw::g_paused.store(false);
   gxbridge::shutdown();
   aurora_shutdown();
-  return 0;
+  // The game's threads are still running: returning would destroy the runtime's globals (the guest
+  // thread list ...) under them, and a thread that then looks itself up aborts the process.
+  fflush(nullptr);
+  std::_Exit(0);
 }

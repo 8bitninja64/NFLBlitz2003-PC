@@ -37,6 +37,19 @@ audio through a host implementation of the GameCube's audio DSP, input through S
    first start the game compiles itself from your disc (about a minute).
 3. Run `NFLBlitz2003.exe` and pick your `NFL Blitz 2003 (USA)` disc image when asked.
 
+## Playing on Linux
+
+1. Download `NFLBlitz2003-linux-x64.tar.xz` from the [Releases](../../releases) page and unpack it
+   (`tar xf NFLBlitz2003-linux-x64.tar.xz`). It runs on x86-64 distributions from about 2024 on
+   (glibc 2.39; Ubuntu 24.04, Fedora 40, Debian 13 and newer) and needs a Vulkan driver (Mesa or
+   NVIDIA's, standard on current distributions and the Steam Deck). The OpenGL ES fallback does not
+   draw the game correctly yet.
+2. Install the packages for the one-time compile: `python3` and `clang`
+   (`sudo apt install python3 clang` on Ubuntu/Debian, `sudo dnf install python3 clang` on Fedora).
+3. Run `NFLBlitz2003/NFLBlitz2003` and pick your disc image when asked (needs `zenity` or `kdialog`;
+   otherwise start it with `--disc "path/to/NFL Blitz 2003 (USA).iso"`). The first start compiles the
+   game code from your disc, which takes a few minutes; run it from a terminal to watch the progress.
+
 ## Building from source
 
 ### Windows
@@ -65,6 +78,7 @@ tools/build_linux.sh "path/to/NFL Blitz 2003 (USA).iso"
 ```
 
 Run `build/linux-clang/NFLBlitz2003 --disc "path/to/NFL Blitz 2003 (USA).iso"`.
+`tools/package_linux.sh` makes the release archive (runtime only, ~6 MB).
 
 ## Controls
 

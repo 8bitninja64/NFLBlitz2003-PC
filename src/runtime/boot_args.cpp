@@ -38,9 +38,19 @@ static std::string exeDir() {
   size_t slash = s.find_last_of("\\/");
   return slash == std::string::npos ? std::string(".") : s.substr(0, slash);
 #else
-  return ".";
+  std::error_code ec;
+  std::string dir = std::filesystem::read_symlink("/proc/self/exe", ec).parent_path().string();
+  return dir.empty() ? std::string(".") : dir;
 #endif
 }
+
+#ifdef _WIN32
+static const char* kModuleName = "blitz_game.dll";
+static const char* kModuleTool = "tools/make_module.ps1";
+#else
+static const char* kModuleName = "blitz_game.so";
+static const char* kModuleTool = "tools/make_module.sh";
+#endif
 
 bool bootFromArgs(int argc, char** argv, BootOptions* opts) {
 #ifdef _WIN32
@@ -131,7 +141,7 @@ bool bootFromArgs(int argc, char** argv, BootOptions* opts) {
     return false;
   };
   std::string primary = opts && !opts->modulePath.empty() ? opts->modulePath : defaultModulePath();
-  std::string built = opts && !opts->userDir.empty() ? opts->userDir + "/blitz_game.dll" : std::string();
+  std::string built = opts && !opts->userDir.empty() ? opts->userDir + "/" + kModuleName : std::string();
   bool loaded = tryLoad(primary) || (!built.empty() && tryLoad(built));
   if (!loaded && opts && opts->buildModule && !built.empty()) {
     std::string dolPath = opts->userDir + "/module_build/main.dol";
@@ -145,7 +155,7 @@ bool bootFromArgs(int argc, char** argv, BootOptions* opts) {
     loaded = tryLoad(built);
   }
   if (!loaded) {
-    if (error.empty()) error = "The game module (" + primary + ") is missing. Build it from your disc with tools/make_module.ps1.";
+    if (error.empty()) error = "The game module (" + primary + ") is missing. Build it from your disc with " + kModuleTool + ".";
     return fail(error);
   }
 
