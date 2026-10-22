@@ -58,7 +58,7 @@ Requirements: Windows 10/11, Visual Studio 2022 (or its Build Tools) with C++ an
 Git, and your disc image.
 
 ```bash
-git clone --recursive https://github.com/<owner>/<repo>.git
+git clone --recursive https://github.com/8bitninja64/NFLBlitz2003-PC.git
 ```
 
 ```bash
