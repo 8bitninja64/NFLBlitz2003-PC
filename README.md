@@ -33,8 +33,9 @@ audio through a host implementation of the GameCube's audio DSP, input through S
 1. Download `NFLBlitz2003-windows-x64.zip` from the
    [Releases](../../releases) page and unzip it anywhere.
 2. Install [Python 3](https://www.python.org/downloads/) and
-   [Visual Studio 2022 Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with
-   *Desktop development with C++* and *C++ Clang tools for Windows*. They are needed once: on its
+   [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (2022 or newer,
+   including 2026) with *Desktop development with C++*, *C++ Clang tools for Windows* and
+   *C++ CMake tools for Windows*. They are needed once: on its
    first start the game compiles itself from your disc (about a minute).
 3. Run `NFLBlitz2003.exe` and pick your `NFL Blitz 2003 (USA)` disc image when asked.
 
@@ -63,7 +64,8 @@ start with a particular disc image, set the shortcut's Launch Options to
 
 ### Windows
 
-Requirements: Windows 10/11, Visual Studio 2022 (or its Build Tools) with C++ and Clang, Python 3,
+Requirements: Windows 10/11, Visual Studio 2022 or newer (or its Build Tools) with the C++, Clang
+and CMake components listed above, Python 3,
 Git, and your disc image.
 
 ```bash

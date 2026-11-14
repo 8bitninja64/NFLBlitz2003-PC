@@ -353,8 +353,8 @@ static bool buildModule(const std::string& dolPath, const std::string& outPath) 
   if (!getenv("BLITZ_AUTO_BUILD") &&
       MessageBoxW(nullptr,
                   L"NFL Blitz 2003 needs to compile the game code from your disc. This is done once and takes "
-                  L"about a minute.\n\nRequirements: Python 3 and Visual Studio 2022 (or its Build Tools) with the "
-                  L"C++ and Clang components.\n\nCompile now?",
+                  L"about a minute.\n\nRequirements: Python 3 and Visual Studio 2022 or newer (or its Build Tools) with the "
+                  L"C++, Clang and CMake components.\n\nCompile now?",
                   L"NFL Blitz 2003 - first start", MB_YESNO | MB_ICONINFORMATION) != IDYES)
     return false;
   std::filesystem::path work = std::filesystem::u8path(dolPath).parent_path();
